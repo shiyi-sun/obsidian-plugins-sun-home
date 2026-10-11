@@ -1,0 +1,32 @@
+{
+  "name": "obsidian-kb-home",
+  "version": "1.6.0",
+  "description": "把 Obsidian 首页变成知识库卡片墙，点击进入知识库的树状目录，并渲染 ::: 提示块",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test:click": "node scripts/cdp/run.mjs scripts/cdp/t1-click.mjs",
+    "test:live": "node scripts/cdp/run-all.mjs",
+    "test:smoke": "node scripts/smoke-order.js"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "knowledge-base"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
+    "@types/node": "^20.11.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "obsidian": "^1.4.11",
+    "typescript": "^5.3.3"
+  },
+  "allowScripts": {
+    "esbuild@0.20.2": true
+  }
+}

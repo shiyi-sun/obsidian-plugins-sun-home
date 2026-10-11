@@ -1,0 +1,768 @@
+/* ============================================================
+   知识库首页（Knowledge Base Home）
+   语雀风格知识库卡片墙 + 单库树视图
+   使用 Obsidian 主题变量，自动适配明暗主题
+   ============================================================ */
+
+.kb-home-container {
+  padding: 28px 32px 48px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+/* ---------- 顶部工具条 ---------- */
+.kb-home-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+.kb-home-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.kb-home-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.kb-home-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.kb-home-btn:hover {
+  opacity: 0.88;
+}
+
+.kb-home-btn-ghost {
+  background: transparent;
+  color: var(--text-normal);
+}
+
+.kb-home-btn-ghost:hover {
+  background: var(--background-modifier-hover);
+  opacity: 1;
+}
+
+/* ---------- 分组 ---------- */
+.kb-group {
+  margin-bottom: 28px;
+}
+
+.kb-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kb-group-toggle {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 12px;
+}
+
+.kb-group-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.kb-group-count {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.kb-group-tools {
+  display: none;
+  gap: 8px;
+  margin-left: 6px;
+}
+
+.kb-group-header:hover .kb-group-tools {
+  display: flex;
+}
+
+.kb-group-tool {
+  font-size: 12px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.kb-group-tool:hover {
+  color: var(--text-normal);
+}
+
+/* ---------- 卡片网格 ---------- */
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.kb-card {
+  position: relative;
+  padding: 18px 18px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.kb-card:hover {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.kb-card-dragging {
+  opacity: 0.4;
+}
+
+.kb-card-drop-target {
+  border-color: var(--interactive-accent);
+  border-style: dashed;
+}
+
+/* 拖拽卡片到分组区域：高亮整个分组，提示「松手即移入」 */
+.kb-group-drop-target {
+  background: var(--background-modifier-hover);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--interactive-accent);
+}
+
+.kb-group-drop-target > .kb-group-header .kb-group-name::after {
+  content: "（松手移入）";
+  font-size: 12px;
+  color: var(--interactive-accent);
+  margin-left: 6px;
+}
+
+/* 折叠分组的拖放提示区 */
+.kb-group-drop-hint {
+  margin: 4px 0 8px;
+  padding: 10px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.kb-group-drop-hint.kb-group-drop-target {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+.kb-card-icon {
+  font-size: 20px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.kb-card-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kb-card-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-card-tools {
+  display: none;
+  flex-shrink: 0;
+}
+
+.kb-card:hover .kb-card-tools {
+  display: block;
+}
+
+.kb-card-tool {
+  font-size: 14px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.kb-card-tool:hover {
+  color: var(--text-normal);
+}
+
+.kb-card-count {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* 空分组提示：一行灰字，不占卡片位 */
+.kb-group-empty {
+  grid-column: 1 / -1;
+  padding: 2px 2px 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.kb-home-empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ============================================================
+   单库树侧边视图
+   ============================================================ */
+
+.kb-tree-container {
+  height: 100%;
+  /* 具体留白与滚动交给内部的 nav-files-container（原生树那一份） */
+  padding: 0;
+}
+
+/* 每次重绘新建的拖拽宿主：撑满高度，树主体自己滚 */
+.kb-tree-host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.kb-tree-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.kb-tree-back {
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+.kb-tree-back:hover {
+  color: var(--interactive-accent);
+}
+
+/* 标题行：库名 + 右侧工具按钮 */
+.kb-tree-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kb-tree-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: var(--radius-s);
+}
+
+/* 库根也是拖拽放置目标：给出与「移入文件夹」同样的底色 */
+.kb-tree-title[data-kb-drop-folder] {
+  background: hsla(var(--interactive-accent-hsl), 0.1);
+  box-shadow: inset 0 0 0 1px var(--interactive-accent);
+  color: var(--nav-item-color-highlighted, var(--interactive-accent));
+}
+
+/* 顶部工具按钮条：按钮本身用原生的 clickable-icon nav-action-button，这里只管排布 */
+.kb-tree-toolbar {
+  flex-shrink: 0;
+}
+
+.kb-tree-empty {
+  padding: 24px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---------- 弹窗 ---------- */
+.kb-modal-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: -4px;
+}
+
+.kb-modal-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.kb-setting-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 视图头部按钮：激活态（如「自动定位当前笔记」开启时） */
+.view-action.is-active {
+  color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+  border-radius: 4px;
+}
+
+/* ---------- 弹窗按钮 ---------- */
+.kb-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.kb-modal-buttons button {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.kb-modal-buttons button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.kb-modal-buttons button.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.kb-modal-buttons button.mod-warning {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  border-color: var(--background-modifier-error);
+}
+
+/* ============================================================
+   排序 / 置顶 / 隐藏 特性（整合自 flexplorer）
+   为兼容旧版 Obsidian，此处全部使用扁平选择器（不用 CSS 嵌套）
+   ============================================================ */
+
+/* ---------- 置顶图钉指示器（原生树 + 单库树共用，两者容器都带 nav-files-container） ---------- */
+.nav-files-container .tree-item .tree-item-self {
+  align-items: center;
+}
+
+.nav-files-container .tree-item .kb-indicator {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.nav-files-container .tree-item .kb-indicator .kb-pin-indicator {
+  height: var(--icon-s);
+  width: var(--icon-s);
+  padding-top: 0.5px;
+  opacity: 0.5;
+}
+
+.nav-files-container .tree-item .kb-indicator .kb-pin-indicator svg {
+  margin-bottom: -2px;
+  transform: rotate(45deg);
+  --icon-size: 14px;
+  --icon-stroke: var(--icon-s-stroke-width);
+}
+
+/* 隐藏态：默认不显示 */
+.nav-files-container .tree-item.kb-hidden {
+  display: none;
+}
+
+/* 开启「显示隐藏」后变淡显示 */
+body.kb-show-hidden .nav-files-container .tree-item.kb-hidden {
+  display: revert;
+  opacity: 0.4;
+}
+
+/* ---------- 拖拽状态 ---------- */
+
+/* 原生树里由插件自己实现边缘滚动，要先禁掉 Chromium 的原生自动滚动；
+   单库树没有自建滚动，反过来要保留它，所以这条只作用于原生树 */
+body.kb-dragging [data-type="file-explorer"] .nav-files-container {
+  overflow: hidden !important;
+}
+
+/* 下面的放置指示由两棵树共用：原生树的容器和单库树都带 nav-files-container */
+
+/* 放置线 */
+body.kb-dragging .nav-files-container .tree-item[data-kb-drop-sibling] {
+  position: relative;
+}
+
+body.kb-dragging .nav-files-container .tree-item[data-kb-drop-sibling="before"]::before,
+body.kb-dragging .nav-files-container .tree-item[data-kb-drop-sibling="after"]::after {
+  content: "";
+  position: absolute;
+  display: block;
+  translate: 12px -1px;
+  height: 2px;
+  width: 90%;
+  left: 0px;
+  z-index: 1;
+  border-radius: 10px;
+  background: var(--color-accent);
+}
+
+/* 相邻指示线偏移 */
+body.kb-dragging .nav-files-container .tree-item.nav-folder[data-kb-drop-sibling="after"]:not(.is-collapsed)::after {
+  transform: translateY(2px);
+}
+
+body.kb-dragging .nav-files-container .nav-folder-children .tree-item[data-kb-drop-sibling="after"]:nth-last-child(1 of .tree-item)::after {
+  transform: translateY(-2px);
+}
+
+/* 覆盖 Obsidian 自带的放置高亮 */
+body.kb-dragging .nav-files-container > div.is-being-dragged-over,
+body.kb-dragging .nav-files-container .nav-folder.is-being-dragged-over {
+  background-color: revert;
+}
+
+body.kb-dragging .nav-files-container > div.is-being-dragged-over > .nav-folder-title,
+body.kb-dragging .nav-files-container .nav-folder.is-being-dragged-over > .nav-folder-title {
+  color: var(--nav-item-color);
+}
+
+body.kb-dragging .nav-files-container > div[data-kb-drop-folder],
+body.kb-dragging .nav-files-container .nav-folder[data-kb-drop-folder] {
+  background-color: hsla(var(--interactive-accent-hsl), 0.05);
+  border-radius: var(--radius-s);
+}
+
+body.kb-dragging .nav-files-container > div[data-kb-drop-folder] > .nav-folder-title,
+body.kb-dragging .nav-files-container .nav-folder[data-kb-drop-folder] > .nav-folder-title {
+  color: var(--nav-item-color-highlighted);
+}
+
+/* 拖拽时隐藏 tooltip */
+body.kb-dragging .drag-ghost {
+  display: none;
+}
+
+/* ---------- 设置面板：隐藏规则文本框 ---------- */
+.kb-hide-patterns {
+  width: 100%;
+  min-height: 110px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.kb-hide-patterns:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+/* ---------- 设置面板：已隐藏项目列表 ---------- */
+.kb-hidden-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.kb-hidden-list .setting-item {
+  border-top: none;
+  padding: 6px 0;
+}
+
+.kb-hidden-list .setting-item-name {
+  font-family: var(--font-monospace);
+  font-size: 13px;
+}
+
+
+/* ==========================================================================
+   Admonition Blocks — 提示块样式
+   参考 Halo docsme 提示块，类名与配色保持一致
+   ========================================================================== */
+
+.admonition {
+	--adm-note: #d4d5d8;
+	--adm-tip: #009400;
+	--adm-info: #4cb3d4;
+	--adm-warning: #e6a700;
+	--adm-danger: #e13238;
+
+	display: flex;
+	flex-direction: column;
+	/* 整块比周围正文小一档（em 跟着编辑器/阅读视图各自的字号走，调字体设置不会失衡） */
+	font-size: 0.875em;
+	margin: 0.75rem 0;
+	/* 上 1rem / 左右 1.25rem / 下 12px：正文到块底的收口比顶部紧一档 */
+	padding: 1rem 1.25rem 12px;
+	border-left: 4px solid var(--adm-note);
+	border-radius: 0.5rem;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.admonition-note {
+	background-color: rgba(212, 213, 216, 0.28);
+	border-left-color: var(--adm-note);
+}
+
+.admonition-tip {
+	background-color: rgba(0, 148, 0, 0.09);
+	border-left-color: var(--adm-tip);
+}
+
+.admonition-info {
+	background-color: rgba(76, 179, 212, 0.11);
+	border-left-color: var(--adm-info);
+}
+
+.admonition-warning {
+	background-color: rgba(230, 167, 0, 0.11);
+	border-left-color: var(--adm-warning);
+}
+
+.admonition-danger {
+	background-color: rgba(225, 50, 56, 0.09);
+	border-left-color: var(--adm-danger);
+}
+
+/* --- 标题行 ---------------------------------------------------------- */
+
+.admonition .admonition-heading {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	color: #474748;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.admonition .admonition-heading-text {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* 标题内的行内 Markdown 保持紧凑 */
+.admonition .admonition-heading-text p {
+	display: inline;
+	margin: 0;
+}
+
+.admonition .admonition-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.25rem;
+	height: 1.25rem;
+	color: #474748;
+	flex: 0 0 auto;
+}
+
+.admonition .admonition-icon svg {
+	width: 1rem;
+	height: 1rem;
+	fill: currentColor;
+}
+
+/* --- 正文 ------------------------------------------------------------ */
+
+/* 标题与正文之间的缝。刻意用 margin 而不是 flex 的 gap：
+   实时预览里 .cm-content > div 会把块的 display 拍成 block，gap 直接失效（实测缝=0）。
+   缝小于框的上下内边距（1rem）时，标题会显得比正文更贴框顶。 */
+.admonition > .admonition-heading + .admonition-content {
+	margin-top: 5px;
+}
+
+.admonition .admonition-content {
+	color: rgba(31, 41, 55, 0.85);
+	line-height: 1.6;
+}
+
+.admonition .admonition-content > *:first-child {
+	margin-top: 0;
+}
+
+.admonition .admonition-content > *:last-child {
+	margin-bottom: 0;
+}
+
+.admonition .admonition-content p {
+	margin: 0;
+}
+
+.admonition .admonition-content p:not(:last-child) {
+	margin-bottom: 0.5rem;
+}
+
+.admonition .admonition-content code {
+	background-color: rgba(0, 0, 0, 0.06);
+	padding: 0.1em 0.35em;
+	border-radius: 0.25rem;
+}
+
+/* 嵌套提示块：缩小间距，并且字号不再叠乘（内层保持和外层一样大） */
+.admonition .admonition {
+	font-size: 1em;
+	margin: 0.5rem 0;
+}
+
+/* --- 折叠 ------------------------------------------------------------ */
+
+.admonition-collapsible .admonition-heading {
+	cursor: pointer;
+	user-select: none;
+}
+
+.admonition .admonition-arrow {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	color: currentColor;
+	opacity: 0.75;
+	transition: transform 0.15s ease;
+	transform: rotate(90deg);
+}
+
+.admonition.is-collapsed .admonition-arrow {
+	transform: rotate(0deg);
+}
+
+.admonition.is-collapsed .admonition-content {
+	display: none;
+}
+
+/* ==========================================================================
+   编辑器内的提示块（Live Preview 块 Widget）
+   ========================================================================== */
+
+/* 块级 widget 需要撑开行高并留出间距 */
+.admonition.admonition-cm-block {
+	margin: 0.5rem 0;
+	cursor: text;
+}
+
+/* 编辑器里块内的标题/段落继承编辑器的字体 */
+.admonition.admonition-cm-block .admonition-content > *:first-child {
+	margin-top: 0;
+}
+
+.admonition.admonition-cm-block .admonition-content > *:last-child {
+	margin-bottom: 0;
+}
+
+/* ==========================================================================
+   暗色主题
+   ========================================================================== */
+
+.theme-dark .admonition .admonition-heading,
+.theme-dark .admonition .admonition-icon {
+	color: #f9fafb;
+}
+
+.theme-dark .admonition .admonition-content {
+	color: rgba(249, 250, 251, 0.85);
+}
+
+.theme-dark .admonition .admonition-content code {
+	background-color: rgba(255, 255, 255, 0.1);
+}
+
+.theme-dark .admonition-note .admonition-heading,
+.theme-dark .admonition-note .admonition-icon {
+	color: #ffffff;
+}
+
+.theme-dark .admonition-tip .admonition-heading,
+.theme-dark .admonition-tip .admonition-icon {
+	color: #00fa00;
+}
+
+.theme-dark .admonition-info .admonition-heading,
+.theme-dark .admonition-info .admonition-icon {
+	color: #9ed6e8;
+}
+
+.theme-dark .admonition-warning .admonition-heading,
+.theme-dark .admonition-warning .admonition-icon {
+	color: #ffce4d;
+}
+
+.theme-dark .admonition-danger .admonition-heading,
+.theme-dark .admonition-danger .admonition-icon {
+	color: #ee8b8e;
+}
+
+/* 暗色下提高底色饱和度，避免过淡 */
+.theme-dark .admonition-note {
+	background-color: rgba(212, 213, 216, 0.08);
+}
+.theme-dark .admonition-tip {
+	background-color: rgba(0, 148, 0, 0.14);
+}
+.theme-dark .admonition-info {
+	background-color: rgba(76, 179, 212, 0.14);
+}
+.theme-dark .admonition-warning {
+	background-color: rgba(230, 167, 0, 0.14);
+}
+.theme-dark .admonition-danger {
+	background-color: rgba(225, 50, 56, 0.14);
+}
+
+/* ==========================================================================
+   阅读视图里被搬空的标记行外壳
+   Obsidian 的增量渲染攥着这些 el-* 节点，不能摘掉，只能清空后藏起来
+   ========================================================================== */
+
+.markdown-preview-view [class^="el-"]:empty,
+.markdown-preview-view [class*=" el-"]:empty {
+  display: none;
+  margin: 0;
+}

@@ -1,0 +1,10 @@
+{
+  "id": "kb-home",
+  "name": "知识库管理",
+  "version": "1.6.0",
+  "minAppVersion": "1.4.0",
+  "description": "把 Obsidian 首页变成知识库卡片墙，点击进入知识库的树状目录；支持拖拽排序、置顶与隐藏文件，并渲染 ::: 提示块。",
+  "author": "sun",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

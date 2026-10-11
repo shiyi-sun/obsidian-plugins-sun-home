@@ -1,0 +1,15 @@
+# 依赖（用 npm install 还原，不入库）
+node_modules/
+
+# 构建产物（由 npm run build 生成）
+main.js
+dist/
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.obsidian/
+*.log
+
+# npm run test:smoke 临时转译产物
+.smoke-build/
