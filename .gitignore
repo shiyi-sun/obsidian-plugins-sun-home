@@ -1,8 +1,7 @@
 # 依赖（用 npm install 还原，不入库）
 node_modules/
 
-# 构建产物（由 npm run build 生成）
-main.js
+# 构建产物：main.js 随版本提交，clone 后可直接安装；发布包 dist/ 不入库
 dist/
 
 # 系统 / 编辑器
