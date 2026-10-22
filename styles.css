@@ -120,7 +120,7 @@
   padding: 7px 12px;
   border-radius: 6px;
   border: 1px solid transparent;
-  background: var(--background-secondary);
+  background: transparent;
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
   min-height: 44px;
@@ -131,10 +131,42 @@
   align-items: center;
 }
 
+/* 三种卡片外观：线框 / 浅灰底 / 分隔线 */
+.kb-cards-border .kb-card {
+  border-color: var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.kb-cards-gray .kb-card {
+  border-color: transparent;
+  background: var(--background-secondary);
+}
+
+.kb-cards-divider .kb-grid {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0 28px;
+}
+
+.kb-cards-divider .kb-card {
+  border: none;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: transparent;
+  padding: 9px 4px;
+  min-height: 40px;
+}
+
 .kb-card:hover {
   border-color: var(--interactive-accent);
   background: var(--background-primary);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.kb-cards-divider .kb-card:hover {
+  border-color: transparent;
+  border-bottom-color: var(--interactive-accent);
+  background: transparent;
+  box-shadow: none;
 }
 
 .kb-card-dragging {
@@ -144,6 +176,11 @@
 .kb-card-drop-target {
   border-color: var(--interactive-accent);
   border-style: dashed;
+}
+
+.kb-cards-divider .kb-card.kb-card-drop-target {
+  border: 1px dashed var(--interactive-accent);
+  border-radius: 4px;
 }
 
 /* 拖拽卡片到分组区域：高亮整个分组，提示「松手即移入」 */

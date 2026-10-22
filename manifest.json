@@ -1,7 +1,7 @@
 {
   "id": "sun-home",
   "name": "知识库管理",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "minAppVersion": "1.4.0",
   "description": "把 Obsidian 首页变成知识库卡片墙，以真实文件夹分组，点击进入知识库的树状目录；支持拖拽排序、置顶与隐藏文件。",
   "author": "sun",

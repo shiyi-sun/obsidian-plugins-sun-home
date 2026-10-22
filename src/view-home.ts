@@ -95,7 +95,7 @@ export class KbHomeView extends ItemView {
     newGroupBtn.setText("＋ 新建分组");
     newGroupBtn.onclick = () => this.promptNewGroup();
 
-    const body = container.createDiv({ cls: "kb-home-body" });
+    const body = container.createDiv({ cls: `kb-home-body kb-cards-${settings.cardStyle}` });
 
     // 先渲染分组（按定义顺序），再渲染未分组
     const grouped = new Set<string>();

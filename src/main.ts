@@ -14,6 +14,7 @@ import { KbHomeView, VIEW_TYPE_KB_HOME } from "./view-home";
 import { KbTreeView, VIEW_TYPE_KB_TREE } from "./view-tree";
 import {
   KbSettings,
+  CardStyle,
   DEFAULT_SETTINGS,
   KnowledgeBase,
   KnowledgeGroup,
@@ -555,6 +556,9 @@ export default class KbHomePlugin extends Plugin {
     if (loaded) delete loaded.treeOrder;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     // 兼容旧数据
+    if (!["border", "gray", "divider"].includes(this.settings.cardStyle)) {
+      this.settings.cardStyle = DEFAULT_SETTINGS.cardStyle;
+    }
     if (!Array.isArray(this.settings.groups)) this.settings.groups = [];
     if (!this.settings.overrides) this.settings.overrides = {};
     if (!Array.isArray(this.settings.ungroupedOrder)) this.settings.ungroupedOrder = [];
@@ -963,6 +967,23 @@ class KbSettingTab extends PluginSettingTab {
           this.plugin.settings.openOnStartup = v;
           await this.plugin.saveSettings();
         })
+      );
+
+    new Setting(containerEl)
+      .setName("卡片样式")
+      .setDesc(
+        "线框：纸面底色 + 细边框；浅灰：实心灰底，库少时更成块；分隔线：去掉卡片框，只留行间细线，库多时最安静。"
+      )
+      .addDropdown((d) =>
+        d
+          .addOption("border", "线框")
+          .addOption("gray", "浅灰背景")
+          .addOption("divider", "分隔线")
+          .setValue(this.plugin.settings.cardStyle)
+          .onChange(async (v) => {
+            this.plugin.settings.cardStyle = v as CardStyle;
+            await this.plugin.saveSettings();
+          })
       );
 
     new Setting(containerEl)

@@ -597,6 +597,7 @@ var AdmonitionFeature = class {
 
 // src/data.ts
 var DEFAULT_SETTINGS = {
+  cardStyle: "border",
   groups: [],
   overrides: {},
   ungroupedOrder: [],
@@ -1058,7 +1059,7 @@ var KbHomeView = class extends import_obsidian4.ItemView {
     });
     newGroupBtn.setText("\uFF0B \u65B0\u5EFA\u5206\u7EC4");
     newGroupBtn.onclick = () => this.promptNewGroup();
-    const body = container.createDiv({ cls: "kb-home-body" });
+    const body = container.createDiv({ cls: `kb-home-body kb-cards-${settings.cardStyle}` });
     const grouped = /* @__PURE__ */ new Set();
     const missing = [];
     for (const g of settings.groups) {
@@ -4318,6 +4319,9 @@ var KbHomePlugin = class extends import_obsidian14.Plugin {
     if (loaded)
       delete loaded.treeOrder;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+    if (!["border", "gray", "divider"].includes(this.settings.cardStyle)) {
+      this.settings.cardStyle = DEFAULT_SETTINGS.cardStyle;
+    }
     if (!Array.isArray(this.settings.groups))
       this.settings.groups = [];
     if (!this.settings.overrides)
@@ -4654,6 +4658,14 @@ var KbSettingTab = class extends import_obsidian14.PluginSettingTab {
     new import_obsidian14.Setting(containerEl).setName("\u542F\u52A8\u65F6\u81EA\u52A8\u6253\u5F00\u77E5\u8BC6\u5E93\u5217\u8868").setDesc("\u6253\u5F00 Obsidian \u65F6\uFF0C\u81EA\u52A8\u5728\u4E3B\u533A\u57DF\u5C55\u793A\u77E5\u8BC6\u5E93\u5361\u7247\u5899").addToggle(
       (t) => t.setValue(this.plugin.settings.openOnStartup).onChange(async (v) => {
         this.plugin.settings.openOnStartup = v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian14.Setting(containerEl).setName("\u5361\u7247\u6837\u5F0F").setDesc(
+      "\u7EBF\u6846\uFF1A\u7EB8\u9762\u5E95\u8272 + \u7EC6\u8FB9\u6846\uFF1B\u6D45\u7070\uFF1A\u5B9E\u5FC3\u7070\u5E95\uFF0C\u5E93\u5C11\u65F6\u66F4\u6210\u5757\uFF1B\u5206\u9694\u7EBF\uFF1A\u53BB\u6389\u5361\u7247\u6846\uFF0C\u53EA\u7559\u884C\u95F4\u7EC6\u7EBF\uFF0C\u5E93\u591A\u65F6\u6700\u5B89\u9759\u3002"
+    ).addDropdown(
+      (d) => d.addOption("border", "\u7EBF\u6846").addOption("gray", "\u6D45\u7070\u80CC\u666F").addOption("divider", "\u5206\u9694\u7EBF").setValue(this.plugin.settings.cardStyle).onChange(async (v) => {
+        this.plugin.settings.cardStyle = v;
         await this.plugin.saveSettings();
       })
     );

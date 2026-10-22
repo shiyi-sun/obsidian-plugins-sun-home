@@ -34,8 +34,13 @@ export interface KnowledgeGroup {
   order: string[];
 }
 
+/** 知识库卡片的视觉模式 */
+export type CardStyle = "border" | "gray" | "divider";
+
 /** 持久化到插件 data.json 的配置 */
 export interface KbSettings {
+  /** 卡片墙外观：线框 / 浅灰底 / 分隔线 */
+  cardStyle: CardStyle;
   /** 分组定义；新版每组对应一个真实文件夹 */
   groups: KnowledgeGroup[];
   /** 各知识库的元信息覆盖（名称 / 图标） */
@@ -53,6 +58,7 @@ export interface KbSettings {
 }
 
 export const DEFAULT_SETTINGS: KbSettings = {
+  cardStyle: "border",
   groups: [],
   overrides: {},
   ungroupedOrder: [],
