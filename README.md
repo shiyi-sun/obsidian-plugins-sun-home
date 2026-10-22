@@ -251,6 +251,10 @@ obsidian-sun-home/
 - 提示块的阅读渲染会改写 Obsidian 已渲染的 DOM。若与其它同样改写预览 DOM 的插件
   （自定义 CSS 类、其它 admonition 类插件）同时启用，先后顺序可能互相影响
 
+## 许可证
+
+MIT。整合自 Flexplorer 的部分（见上文）仍保留其 MIT 版权声明。
+
 ## 兼容性
 
 - `minAppVersion`: 1.4.0
