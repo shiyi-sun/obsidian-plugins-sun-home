@@ -17,7 +17,7 @@ async function waitReady(ctx, ms = 30000) {
 }
 
 const DISK = () =>
-  window.app.vault.adapter.read(".obsidian/plugins/kb-home/data.json").then((t) => {
+  window.app.vault.adapter.read(".obsidian/plugins/sun-home/data.json").then((t) => {
     const d = JSON.parse(t);
     return {
       A自定义顺序: d.order?.items?.["__kb自测__/子文件夹A"]?.customOrder ?? null,
@@ -31,7 +31,7 @@ const DISK = () =>
   });
 
 const MEM = () => {
-  const p = window.app.plugins.plugins["kb-home"];
+  const p = window.app.plugins.plugins["sun-home"];
   const s = p?.settings;
   const view = window.app.workspace.getLeavesOfType("kb-tree-view")[0]?.view;
   return {
@@ -81,7 +81,7 @@ const EXPLORER_PURITY = () => {
       };
       return { 指示器: 计(".kb-indicator"), 隐藏类: 计(".kb-hidden") };
     })(),
-    插件启用: window.app.plugins.enabledPlugins?.has?.("kb-home") ?? null,
+    插件启用: window.app.plugins.enabledPlugins?.has?.("sun-home") ?? null,
   };
 };
 
@@ -104,7 +104,7 @@ export default async (ctx) => {
   );
   rep.命令 = await ctx.page(() =>
     Object.values(window.app.commands.commands)
-      .filter((c) => String(c.id).startsWith("kb-home"))
+      .filter((c) => String(c.id).startsWith("sun-home"))
       .map((c) => `${c.id} | ${c.name}`)
   );
   rep.命令清单 = rep.命令;
@@ -125,7 +125,7 @@ export default async (ctx) => {
 
   // ---------- 3. 写一批设置 → 重载 → 读回（内存 + 磁盘）----------
   await ctx.page((note, pat) => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     p.settings.order.items[note] = { ...(p.settings.order.items[note] || {}), isPinned: true };
     p.settings.order.hidePatterns = [pat];
     // 手动顺序现在只有这一份：order.items[文件夹].customOrder（原生树与单库树共用）
@@ -186,12 +186,12 @@ export default async (ctx) => {
   );
 
   // ---------- 4. 命令：toggle-show-hidden ----------
-  const beforeCmd = await ctx.page(() => ({ body: document.body.classList.contains("kb-show-hidden"), s: window.app.plugins.plugins["kb-home"].settings.order.showHidden }));
-  await ctx.page(() => window.app.commands.executeCommandById("kb-home:toggle-show-hidden"));
+  const beforeCmd = await ctx.page(() => ({ body: document.body.classList.contains("kb-show-hidden"), s: window.app.plugins.plugins["sun-home"].settings.order.showHidden }));
+  await ctx.page(() => window.app.commands.executeCommandById("sun-home:toggle-show-hidden"));
   await sleep(600);
-  const afterCmd = await ctx.page(() => ({ body: document.body.classList.contains("kb-show-hidden"), s: window.app.plugins.plugins["kb-home"].settings.order.showHidden }));
+  const afterCmd = await ctx.page(() => ({ body: document.body.classList.contains("kb-show-hidden"), s: window.app.plugins.plugins["sun-home"].settings.order.showHidden }));
   add("命令「显示/隐藏被隐藏的文件」翻转状态并落盘", beforeCmd.body !== afterCmd.body && afterCmd.s === afterCmd.body, { beforeCmd, afterCmd });
-  await ctx.page(() => window.app.commands.executeCommandById("kb-home:toggle-show-hidden"));
+  await ctx.page(() => window.app.commands.executeCommandById("sun-home:toggle-show-hidden"));
   await sleep(500);
 
   // ---------- 5. 禁用插件 → 现场清理；再启用 → 恢复 ----------
@@ -205,7 +205,7 @@ export default async (ctx) => {
   });
   await sleep(1000);
   rep.禁用前 = await ctx.page(EXPLORER_PURITY);
-  await ctx.page(() => window.app.plugins.disablePlugin("kb-home"));
+  await ctx.page(() => window.app.plugins.disablePlugin("sun-home"));
   await sleep(1200);
   rep.禁用后 = await ctx.page(EXPLORER_PURITY);
   add("禁用后本插件的两个面板被摘掉", rep.禁用后.树容器在 === false && rep.禁用后.卡片墙在 === false, rep.禁用后);
@@ -213,7 +213,7 @@ export default async (ctx) => {
   add("禁用后原生浏览器仍在正常工作（有行、按原生顺序）", rep.禁用后.浏览器行数 > 0, rep.禁用后.原生顺序前5);
   rep.禁用后报错 = await ctx.page(() => null);
 
-  await ctx.page(() => window.app.plugins.enablePlugin("kb-home"));
+  await ctx.page(() => window.app.plugins.enablePlugin("sun-home"));
   await sleep(1500);
   rep.启用后 = await ctx.page(EXPLORER_PURITY);
   rep.启用后内存 = await ctx.page(MEM);
@@ -230,7 +230,7 @@ export default async (ctx) => {
 
   // ---------- 6. 收尾：清掉本测试写入的设置项 ----------
   await ctx.page((note) => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     if (p.settings.order.items[note]) p.settings.order.items[note].isPinned = false;
     p.settings.order.hidePatterns = [];
     delete p.settings.order.items["__kb自测__/子文件夹A"];

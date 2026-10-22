@@ -40,10 +40,15 @@ const REC = () => {
 };
 
 const SNAP = () => {
-  const s = window.app.plugins.plugins["kb-home"].settings;
+  const s = window.app.plugins.plugins["sun-home"].settings;
   return {
     ungroupedOrder: [...(s.ungroupedOrder || [])],
-    groups: (s.groups || []).map((g) => ({ id: g.id, name: g.name, order: [...g.order] })),
+    groups: (s.groups || []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      path: g.path ?? null,
+      order: [...g.order],
+    })),
   };
 };
 
@@ -165,7 +170,7 @@ export default async (ctx) => {
       await ctx.click(hideItem.x, hideItem.y);
       await sleep(600);
       rep.隐藏后 = await ctx.page((box) => {
-        const s = window.app.plugins.plugins["kb-home"].settings;
+        const s = window.app.plugins.plugins["sun-home"].settings;
         return {
           卡片还在: !!document.querySelector(`.kb-card[data-path="${box}"]`),
           标记: !!s.order.items[box]?.isHidden,
@@ -179,7 +184,7 @@ export default async (ctx) => {
       );
       // 与原生同一开关：打开「显示被隐藏的文件」它就回来
       await ctx.page((box) => {
-        const p = window.app.plugins.plugins["kb-home"];
+        const p = window.app.plugins.plugins["sun-home"];
         p.settings.order.showHidden = true;
         p.sortFeature?.syncRuntimeSettings();
         p.refreshViews();
@@ -193,7 +198,7 @@ export default async (ctx) => {
       add("打开「显示被隐藏的文件」后它又回到列表", 显示隐藏时 === true, { 显示隐藏时 });
       // 复位：取消隐藏 + 关闭 showHidden
       await ctx.page((box) => {
-        const p = window.app.plugins.plugins["kb-home"];
+        const p = window.app.plugins.plugins["sun-home"];
         p.settings.order.showHidden = false;
         if (p.settings.order.items[box]) p.settings.order.items[box].isHidden = false;
         p.sortFeature?.syncRuntimeSettings();
@@ -204,8 +209,8 @@ export default async (ctx) => {
       const 复位后 = await ctx.page(
         (box) => ({
           卡片回来了: !!document.querySelector(`.kb-card[data-path="${box}"]`),
-          还藏着: !!window.app.plugins.plugins["kb-home"].settings.order.items[box]?.isHidden,
-          showHidden: window.app.plugins.plugins["kb-home"].settings.order.showHidden,
+          还藏着: !!window.app.plugins.plugins["sun-home"].settings.order.items[box]?.isHidden,
+          showHidden: window.app.plugins.plugins["sun-home"].settings.order.showHidden,
         }),
         SANDBOX
       );
@@ -216,7 +221,7 @@ export default async (ctx) => {
   // 准备：卡片墙很高，源卡（排最后）与目标卡（排最前）无法同屏。
   // 先把别的分组折叠、并把沙箱卡挪到目标卡旁边 —— 这是 setup，不是被断言的行为。
   rep.整理墙面 = await ctx.page((box) => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     const view = window.app.workspace.getLeavesOfType("kb-home-view")[0]?.view;
     for (const g of p.settings.groups) view.collapsed.add(g.id);
     const rest = p.settings.ungroupedOrder.filter((x) => x !== box);
@@ -282,19 +287,28 @@ export default async (ctx) => {
       rep.移入悬停 = marks2;
       rep.移入后分组 = after2.groups;
       add("拖拽中该分组整体高亮为放置区", marks2.分组高亮.length > 0 && marks2.dragPath === SANDBOX, marks2);
-      add("放下后知识库进入该分组", after2.groups.some((g) => g.name === GROUP && g.order.includes(SANDBOX)), after2.groups);
+      // 真实文件夹分组：拖进分组 = 把知识库文件夹移动到 GROUP 下
+      const movedPath = `${GROUP}/${SANDBOX}`;
+      const 磁盘上 = await ctx.page((p) => !!window.app.vault.getAbstractFileByPath(p), movedPath);
+      add(
+        "放下后知识库进入该分组（文件夹真实移动）",
+        after2.groups.some((g) => g.name === GROUP && g.order.includes(movedPath)) && 磁盘上,
+        { groups: after2.groups, 磁盘上, movedPath }
+      );
     }
   }
 
-  // ---------- 3. 收尾：删掉测试分组并恢复顺序 ----------
-  await ctx.page((snap) => {
-    const p = window.app.plugins.plugins["kb-home"];
+  // ---------- 3. 收尾：解散测试分组（把沙箱移回根目录）并恢复顺序 ----------
+  await ctx.page(async (snap, groupName) => {
+    const p = window.app.plugins.plugins["sun-home"];
+    const g = p.settings.groups.find((x) => x.name === groupName);
+    if (g) await p.dissolveGroup(g);
     p.settings.ungroupedOrder = snap.ungroupedOrder;
-    p.settings.groups = snap.groups;
+    p.settings.groups = p.settings.groups.filter((x) => x.id !== g?.id);
     const v = window.app.workspace.getLeavesOfType("kb-home-view")[0]?.view;
     if (v) v.render();
     return p.saveSettingsNow();
-  }, before);
+  }, before, GROUP);
   await sleep(500);
   const fin = await ctx.page(SNAP);
   add("收尾：分组与顺序回到测试前", JSON.stringify(fin.groups) === JSON.stringify(before.groups), fin.groups.map((g) => g.name));

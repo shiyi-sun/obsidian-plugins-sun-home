@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, Menu } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, Menu, setIcon } from "obsidian";
 import type KbHomePlugin from "./main";
 import {
   KnowledgeBase,
@@ -6,7 +6,8 @@ import {
   scanKnowledgeBases,
   createKnowledgeBase,
   findGroupOf,
-  genGroupId,
+  getFolder,
+  reconcileGroupOrders,
 } from "./data";
 
 export const VIEW_TYPE_KB_HOME = "kb-home-view";
@@ -98,14 +99,24 @@ export class KbHomeView extends ItemView {
 
     // 先渲染分组（按定义顺序），再渲染未分组
     const grouped = new Set<string>();
+    const missing: KnowledgeGroup[] = [];
     for (const g of settings.groups) {
+      // 真实分组文件夹被外部删掉/移走时不渲染空壳，交给设置页处理
+      if (g.path && !getFolder(this.app, g.path)) {
+        missing.push(g);
+        continue;
+      }
+      // 分组文件夹本身被隐藏时整组不出现（与根目录知识库的隐藏语义一致）
+      if (g.path && this.plugin.isHiddenForList(g.path)) continue;
       const items = all.filter((kb) => kb.groupId === g.id);
       items.forEach((kb) => grouped.add(kb.path));
       this.renderGroup(body, g, items);
     }
 
     const ungrouped = all.filter((kb) => !grouped.has(kb.path));
-    if (ungrouped.length > 0) {
+    // 有分组时始终保留「未分组」区域：否则当所有库都在组里时，
+    // 卡片没有任何可以把文件夹拖回根目录的落点。
+    if (ungrouped.length > 0 || settings.groups.length > 0) {
       this.renderGroup(
         body,
         { id: "__ungrouped__", name: settings.groups.length ? "未分组" : "", order: [] },
@@ -113,7 +124,14 @@ export class KbHomeView extends ItemView {
       );
     }
 
-    if (all.length === 0) {
+    if (missing.length > 0) {
+      body.createDiv({
+        cls: "kb-home-empty",
+        text: `分组文件夹不存在：${missing.map((g) => g.path).join("、")}。请在设置里删除该分组或恢复文件夹。`,
+      });
+    }
+
+    if (all.length === 0 && settings.groups.length === 0) {
       body.createDiv({
         cls: "kb-home-empty",
         text: "还没有知识库。在 vault 根目录新建一个文件夹，它就会自动出现在这里。",
@@ -127,6 +145,7 @@ export class KbHomeView extends ItemView {
 
     const sec = parent.createDiv({ cls: "kb-group" });
     sec.dataset.groupId = group.id;
+    if (group.path) sec.dataset.groupPath = group.path;
 
     // 整个分组区域都是放置目标：拖卡片到分组任意位置即可移入该分组。
     // 卡片自身的 drop 会 stopPropagation，所以这里只在「非卡片区域」生效。
@@ -170,7 +189,10 @@ export class KbHomeView extends ItemView {
 
     if (isCollapsed) {
       // 折叠状态下也要能拖进来：给一个提示性的放置区
-      const dropHint = sec.createDiv({ cls: "kb-group-drop-hint", text: "拖到此处移入本分组" });
+      const dropHint = sec.createDiv({
+        cls: "kb-group-drop-hint",
+        text: isUngrouped ? "拖到此处移出分组（放到根目录）" : "拖到此处移入本分组",
+      });
       dropHint.dataset.groupDropHint = group.id;
       return;
     }
@@ -182,9 +204,14 @@ export class KbHomeView extends ItemView {
       card.setAttribute("draggable", "true");
       card.dataset.path = kb.path;
 
-      // 图标
+      // 图标：自定义 emoji 保留，未设置时用主题色线性书本
       const iconEl = card.createDiv({ cls: "kb-card-icon" });
-      iconEl.setText(kb.icon || "📘");
+      if (kb.icon) {
+        iconEl.addClass("is-emoji");
+        iconEl.setText(kb.icon);
+      } else {
+        setIcon(iconEl, "book-open");
+      }
 
       // 名称行
       const nameRow = card.createDiv({ cls: "kb-card-name-row" });
@@ -198,8 +225,8 @@ export class KbHomeView extends ItemView {
         this.promptEditKb(kb);
       };
 
-      // 文档数
-      card.createDiv({ cls: "kb-card-count", text: `文档 ${kb.docCount}` });
+      // 文档数（右对齐，单行展示）
+      card.createDiv({ cls: "kb-card-count", text: `${kb.docCount} 篇` });
 
       // 点击进入
       card.onclick = () => this.plugin.openKbTree(kb);
@@ -220,7 +247,9 @@ export class KbHomeView extends ItemView {
     if (items.length === 0) {
       grid.createDiv({
         cls: "kb-group-empty",
-        text: "空分组 · 把卡片拖进来，或右键分组标题选「新建知识库」",
+        text: isUngrouped
+          ? "没有未分组知识库 · 把卡片拖到这里 → 移出分组（放到根目录）"
+          : "空分组 · 把卡片拖进来（会移动文件夹），或右键分组标题选「新建知识库」",
       });
     }
   }
@@ -257,25 +286,8 @@ export class KbHomeView extends ItemView {
 
   /** 把某个知识库移入目标分组（groupId 为 null 表示移出到未分组） */
   private async moveToGroup(kbPath: string, groupId: string | null): Promise<void> {
-    const s = this.plugin.settings;
-    // 已经在目标分组，无需处理（读设置即可，不必为此整份重扫 vault）
-    if (findGroupOf(s, kbPath) === groupId) return;
-
-    // 从所有分组里移除
-    for (const g of s.groups) {
-      g.order = g.order.filter((p) => p !== kbPath);
-    }
-    s.ungroupedOrder = s.ungroupedOrder.filter((p) => p !== kbPath);
-
-    // 加入目标分组
-    if (groupId) {
-      const g = s.groups.find((x) => x.id === groupId);
-      if (g) g.order.push(kbPath);
-    } else {
-      s.ungroupedOrder.push(kbPath);
-    }
-
-    await this.plugin.saveSettings();
+    // 新版分组会真实移动文件夹；旧虚拟分组只改归属，插件内部已分流
+    await this.plugin.moveKbToGroup(kbPath, groupId);
     this.render();
   }
 
@@ -381,18 +393,64 @@ export class KbHomeView extends ItemView {
   // ============ 交互弹窗 ============
 
   private promptNewKb(groupId: string | null): void {
-    this.plugin.showInputModal("新建知识库", "请输入知识库名称（将创建同名文件夹）", "", async (name) => {
+    const group = groupId
+      ? this.plugin.settings.groups.find((g) => g.id === groupId) ?? null
+      : null;
+    const where = group ? `「${group.name}」分组里` : "vault 根目录下";
+    this.plugin.showInputModal(
+      "新建知识库",
+      `将在${where}创建同名文件夹`,
+      "",
+      async (name) => {
+        if (!name?.trim()) return;
+        try {
+          const s = this.plugin.settings;
+          const target = groupId ? s.groups.find((g) => g.id === groupId) : null;
+          if (groupId && !target) throw new Error("分组不存在");
+          let parentPath = "/";
+          if (target?.path) {
+            if (!getFolder(this.app, target.path)) throw new Error("分组文件夹不存在");
+            parentPath = target.path;
+          }
+          const path = await createKnowledgeBase(this.app, name.trim(), parentPath);
+          // 旧虚拟分组没有真实父目录，只能手动记成员；其余交给目录对齐
+          if (target && !target.path && !target.order.includes(path)) {
+            target.order.push(path);
+          }
+          reconcileGroupOrders(this.app, s);
+          await this.plugin.saveSettingsNow();
+          this.render();
+        } catch (err) {
+          this.plugin.notice(String((err as Error).message || err));
+        }
+      }
+    );
+  }
+
+  private promptNewGroup(): void {
+    this.plugin.showInputModal(
+      "新建分组",
+      this.plugin.hasLegacyGroupDefs()
+        ? "旧分组还没迁移；本次会先建虚拟分组，下次迁移时一起落成文件夹"
+        : "将创建一个真实文件夹作为分组；组内知识库是它的直接子文件夹",
+      "",
+      async (name) => {
+        if (!name?.trim()) return;
+        try {
+          await this.plugin.createGroup(name.trim());
+          this.render();
+        } catch (err) {
+          this.plugin.notice(String((err as Error).message || err));
+        }
+      }
+    );
+  }
+
+  private promptRenameGroup(group: KnowledgeGroup): void {
+    this.plugin.showInputModal("重命名分组", "请输入新的分组名称", group.name, async (name) => {
       if (!name?.trim()) return;
       try {
-        const path = await createKnowledgeBase(this.app, name.trim());
-        const s = this.plugin.settings;
-        if (groupId) {
-          const g = s.groups.find((x) => x.id === groupId);
-          if (g) g.order.push(path);
-        } else {
-          s.ungroupedOrder.push(path);
-        }
-        await this.plugin.saveSettings();
+        await this.plugin.renameGroup(group, name.trim());
         this.render();
       } catch (err) {
         this.plugin.notice(String((err as Error).message || err));
@@ -400,41 +458,18 @@ export class KbHomeView extends ItemView {
     });
   }
 
-  private promptNewGroup(): void {
-    this.plugin.showInputModal("新建分组", "请输入分组名称", "", async (name) => {
-      if (!name?.trim()) return;
-      this.plugin.settings.groups.push({
-        id: genGroupId(),
-        name: name.trim(),
-        order: [],
-      });
-      await this.plugin.saveSettings();
-      this.render();
-    });
-  }
-
-  private promptRenameGroup(group: KnowledgeGroup): void {
-    this.plugin.showInputModal("重命名分组", "请输入新的分组名称", group.name, async (name) => {
-      if (!name?.trim()) return;
-      const g = this.plugin.settings.groups.find((x) => x.id === group.id);
-      if (g) g.name = name.trim();
-      await this.plugin.saveSettings();
-      this.render();
-    });
-  }
-
   private async deleteGroup(group: KnowledgeGroup): Promise<void> {
-    const s = this.plugin.settings;
+    const isReal = !!group.path;
     this.plugin.confirmModal(
       "删除分组",
-      `确定删除分组「${group.name}」吗？组内 ${group.order.length} 个知识库会回到未分组，文件本身不受影响。`,
+      isReal
+        ? `确定删除分组「${group.name}」吗？组内 ${group.order.length} 个知识库会移回 vault 根目录（变成未分组），然后删除空的分组文件夹；不会删除任何笔记。`
+        : `确定删除分组「${group.name}」吗？组内 ${group.order.length} 个知识库会回到未分组，文件本身不受影响。`,
       async () => {
-        // 组内知识库回到未分组
-        for (const p of group.order) {
-          if (!s.ungroupedOrder.includes(p)) s.ungroupedOrder.push(p);
+        const result = await this.plugin.dissolveGroup(group);
+        if (result.errors.length > 0) {
+          this.plugin.notice("删除分组时出错：" + result.errors[0]);
         }
-        s.groups = s.groups.filter((x) => x.id !== group.id);
-        await this.plugin.saveSettings();
         this.render();
       }
     );

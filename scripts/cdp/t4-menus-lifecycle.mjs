@@ -94,7 +94,7 @@ export default async (ctx) => {
 
   // 归一化前提：把该文件的置顶态清掉（上一轮若中断会残留，改变菜单文案）
   await ctx.page((p) => {
-    const st = window.app.plugins.plugins["kb-home"].settings.order;
+    const st = window.app.plugins.plugins["sun-home"].settings.order;
     if (st.items[p]) st.items[p].isPinned = false;
     return st.items[p] ? "已重置" : "无记录";
   }, FILE);
@@ -146,7 +146,7 @@ export default async (ctx) => {
   await ctx.page(EXPAND_CHAIN, FILE);
   await sleep(900);
   const pinned = await ctx.page((p) => {
-    const s = window.app.plugins.plugins["kb-home"].settings.order.items[p];
+    const s = window.app.plugins.plugins["sun-home"].settings.order.items[p];
     const row = document.querySelector(`.nav-file-title[data-path="${p}"]`);
     return { isPinned: s?.isPinned ?? null, 图钉: !!row?.querySelector(".kb-pin-indicator"), 行在: !!row };
   }, FILE);
@@ -165,7 +165,7 @@ export default async (ctx) => {
       await sleep(900);
     }
     const unpinned = await ctx.page((p) => {
-      const s = window.app.plugins.plugins["kb-home"].settings.order.items[p];
+      const s = window.app.plugins.plugins["sun-home"].settings.order.items[p];
       const row = document.querySelector(`.nav-file-title[data-path="${p}"]`);
       return { isPinned: s?.isPinned ?? null, 图钉: !!row?.querySelector(".kb-pin-indicator") };
     }, FILE);
@@ -232,7 +232,7 @@ export default async (ctx) => {
       行在: !!title,
       外层class: wrap?.className ?? null,
       kb隐藏: !!wrap?.classList.contains("kb-hidden"),
-      设置: window.app.plugins.plugins["kb-home"].settings.order.items[p]?.isHidden ?? null,
+      设置: window.app.plugins.plugins["sun-home"].settings.order.items[p]?.isHidden ?? null,
     };
   };
   const hiddenNow = await ctx.page(HIDDEN_ROW, FILE);
@@ -244,7 +244,7 @@ export default async (ctx) => {
     rep.禁用前
   );
 
-  await ctx.page(() => window.app.plugins.disablePlugin("kb-home"));
+  await ctx.page(() => window.app.plugins.disablePlugin("sun-home"));
   await sleep(1600);
   const afterDisable = await ctx.page(MARKS);
   rep.禁用后 = afterDisable;
@@ -252,7 +252,7 @@ export default async (ctx) => {
   add("禁用插件后 DOM 里不再有图钉指示器节点", afterDisable.指示器节点 === 0, afterDisable);
   add("禁用后本插件的两个面板都已摘除", afterDisable.树面板在 === false && afterDisable.卡片墙在 === false, afterDisable);
 
-  await ctx.page(() => window.app.plugins.enablePlugin("kb-home"));
+  await ctx.page(() => window.app.plugins.enablePlugin("sun-home"));
   await sleep(2200);
   await ctx.page(() => {
     const ws = window.app.workspace;
@@ -273,7 +273,7 @@ export default async (ctx) => {
 
   // 复原：隐藏中的行是 display:none，点不到 → 先用本插件的命令临时显示出来，
   // 再取消隐藏，最后把开关关回去（别把测试造成的状态留给下一条用例和用户）。
-  await ctx.page(() => window.app.commands.executeCommandById("kb-home:toggle-show-hidden"));
+  await ctx.page(() => window.app.commands.executeCommandById("sun-home:toggle-show-hidden"));
   await sleep(1000);
   const 显示中 = await ctx.page((p) => ({
     body类: document.body.classList.contains("kb-show-hidden"),
@@ -297,11 +297,11 @@ export default async (ctx) => {
     } else add("隐藏后的菜单里没有「取消隐藏」", false, await ctx.page(ITEMS).then((x) => x.map((i) => i.text)));
   } else add("取消隐藏这一步：找不到行（显示隐藏没生效？）", false, urow);
 
-  await ctx.page(() => window.app.commands.executeCommandById("kb-home:toggle-show-hidden"));
+  await ctx.page(() => window.app.commands.executeCommandById("sun-home:toggle-show-hidden"));
   await sleep(900);
   const restored = await ctx.page(HIDDEN_ROW, FILE);
   const 设置复位 = await ctx.page(() => ({
-    showHidden: window.app.plugins.plugins["kb-home"].settings.order.showHidden,
+    showHidden: window.app.plugins.plugins["sun-home"].settings.order.showHidden,
   }));
   add(
     "收尾：取消隐藏已生效、显示隐藏开关已关回",
@@ -310,7 +310,7 @@ export default async (ctx) => {
   );
 
   // ---------- 3. 分组：删除要有确认弹窗；右键菜单要有文字标签 ----------
-  await ctx.page(() => window.app.plugins.plugins["kb-home"].openKbHome());
+  await ctx.page(() => window.app.plugins.plugins["sun-home"].openKbHome());
   await sleep(900);
   const newBtn = await ctx.page(() => {
     const b = [...document.querySelectorAll(".kb-home-btn")].find((x) => x.textContent.includes("新建分组"));
@@ -389,7 +389,7 @@ export default async (ctx) => {
       // 这是本用例自己造成的前提，直接把视图的折叠态解开（setup，不是被断言的行为）
       await ctx.page((name) => {
         const view = window.app.workspace.getLeavesOfType("kb-home-view")[0]?.view;
-        const g = window.app.plugins.plugins["kb-home"].settings.groups.find((x) => x.name === name);
+        const g = window.app.plugins.plugins["sun-home"].settings.groups.find((x) => x.name === name);
         if (view && g && view.collapsed.has(g.id)) {
           view.collapsed.delete(g.id);
           view.render();
@@ -398,16 +398,26 @@ export default async (ctx) => {
       }, GROUP);
       await sleep(600);
       const st = await ctx.page((name, box) => {
-        const g = window.app.plugins.plugins["kb-home"].settings.groups.find((x) => x.name === name);
-        const card = document.querySelector(`.kb-card[data-path="${box}"]`);
+        const g = window.app.plugins.plugins["sun-home"].settings.groups.find((x) => x.name === name);
+        // 真实文件夹分组：移入后路径变成 GROUP/__kb自测__
+        const movedPath = `${name}/${box}`;
+        const card = document.querySelector(`.kb-card[data-path="${movedPath}"]`);
         return {
           组内: g ? [...g.order] : null,
           卡片在DOM: !!card,
           卡片归属: card?.closest(".kb-group")?.querySelector(".kb-group-name")?.textContent ?? null,
+          新路径: movedPath,
+          磁盘上: !!window.app.vault.getAbstractFileByPath(movedPath),
         };
       }, GROUP, SANDBOX);
       rep.移入结果 = st;
-      add("右键「移入分组」真的把知识库移进组", st.组内?.includes(SANDBOX) === true && st.卡片归属 === GROUP, st);
+      add(
+        "右键「移入分组」真的把知识库移进组（文件夹真实移动）",
+        st.组内?.includes(st.新路径) === true &&
+          st.卡片归属 === GROUP &&
+          st.磁盘上 === true,
+        st
+      );
     } else add("移入子菜单里没有目标分组", false, rep.移入子菜单);
   }
 
@@ -437,21 +447,42 @@ export default async (ctx) => {
     if (cm) {
       const ok = cm.buttons.find((b) => b.text === "确定");
       await ctx.click(Math.round(ok.x + ok.w / 2), Math.round(ok.y + ok.h / 2));
-      await sleep(800);
+      await sleep(1600);
+      const afterDel = await ctx.page((name, box) => {
+        const p = window.app.plugins.plugins["sun-home"];
+        return {
+          分组记录还在: p.settings.groups.some((g) => g.name === name),
+          分组文件夹还在: !!window.app.vault.getAbstractFileByPath(name),
+          沙箱回到根目录: !!window.app.vault.getAbstractFileByPath(box),
+          沙箱还在组里: !!window.app.vault.getAbstractFileByPath(`${name}/${box}`),
+        };
+      }, GROUP, SANDBOX);
+      rep.删除后 = afterDel;
+      add(
+        "确认删除后：知识库回到根目录、空分组文件夹已删除、分组记录消失",
+        !afterDel.分组记录还在 && !afterDel.分组文件夹还在 && afterDel.沙箱回到根目录 && !afterDel.沙箱还在组里,
+        afterDel
+      );
+      // 后续收尾仍会兜底
     }
   } else add("悬停后仍看不到分组 ✕", false, xs);
 
-  // 收尾：确保测试分组与沙箱归属都清掉
-  const snap = await ctx.page((box, name) => {
-    const p = window.app.plugins.plugins["kb-home"];
-    p.settings.groups = p.settings.groups.filter((g) => g.name !== name);
-    p.settings.ungroupedOrder = [...new Set([...p.settings.ungroupedOrder.filter((x) => x !== box), box])];
-    for (const g of p.settings.groups) g.order = g.order.filter((x) => x !== box);
-    return p.saveSettingsNow();
+  // 收尾：解散测试分组（若删除按钮没走通，这里兜底把沙箱移回根目录并删空文件夹）
+  const snap = await ctx.page(async (box, name) => {
+    const p = window.app.plugins.plugins["sun-home"];
+    const g = p.settings.groups.find((x) => x.name === name);
+    if (g) await p.dissolveGroup(g);
+    p.settings.groups = p.settings.groups.filter((x) => x.name !== name);
+    p.settings.ungroupedOrder = [
+      ...new Set([...p.settings.ungroupedOrder.filter((x) => x !== box), box]),
+    ];
+    for (const x of p.settings.groups) x.order = x.order.filter((v) => v !== box);
+    await p.saveSettingsNow();
+    return true;
   }, SANDBOX, GROUP);
   await sleep(500);
   rep.收尾后 = await ctx.page((box) => {
-    const s = window.app.plugins.plugins["kb-home"].settings;
+    const s = window.app.plugins.plugins["sun-home"].settings;
     const card = document.querySelector(`.kb-card[data-path="${box}"]`);
     return {
       groups: s.groups.map((g) => g.name),

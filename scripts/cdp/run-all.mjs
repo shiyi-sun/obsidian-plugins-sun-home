@@ -18,6 +18,7 @@ const cases = [
   "t5-cardwall.mjs", // 卡片墙拖拽：同级重排 + 拖进折叠分组放置区
   "t11-native2.mjs", // 原生文件浏览器的自定义顺序 / 排序菜单 / 置顶
   "t8-persistence.mjs", // 落盘、重启恢复、ribbon 与命令
+  "t14-migration.mjs", // 旧虚拟分组 → 真实文件夹迁移 + 路径状态迁移
   "t13-admonition.mjs", // 提示块渲染 + 增量重算探针 + 设置页开关
   "t12-cleanup.mjs", // 删除沙箱库并清掉测试写入的设置
 ];

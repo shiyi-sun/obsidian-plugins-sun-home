@@ -1,5 +1,6 @@
 import { Menu, Vault, TFolder, TFile } from "obsidian";
 import { initLog } from "./log";
+import { isFolderSettings } from "./order-types";
 import type { OrderSettings, FolderSettings } from "./order-types";
 import { OrderManager } from "./order-manager";
 
@@ -59,7 +60,9 @@ export class Patcher {
       const folderSettings = self.getSettings().items[folder.path] as
         | FolderSettings
         | undefined;
-      if (!folderSettings) return origSorted;
+      // 文件夹路径上可能只有拆出来的置顶/隐藏条目（例如迁移前手动置顶过文件夹），
+      // 它没有 customOrder；直接当 FolderSettings 用会让原生树排序抛异常。
+      if (!isFolderSettings(folderSettings)) return origSorted;
       return self.orderManager.getSortedItems(folderSettings, origSorted);
     };
 

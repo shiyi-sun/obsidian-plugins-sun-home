@@ -152,7 +152,7 @@ const WAIT_DISK = (path, lineRe) =>
   })();
 
 const PROBE = () => {
-  const p = window.app.plugins.plugins["kb-home"];
+  const p = window.app.plugins.plugins["sun-home"];
   const f = p?.features?.get?.("admonition");
   return JSON.stringify({
     有插件: !!p,
@@ -359,7 +359,7 @@ const PV_BLOCKS = () => {
  * 之所以不点设置 modal —— 本机 Obsidian 把设置开成独立窗口，主文档里没有它。
  */
 const MOUNT_SETTINGS = () => {
-  const p = window.app.plugins.plugins["kb-home"];
+  const p = window.app.plugins.plugins["sun-home"];
   document.getElementById("kb-adm-test-host")?.remove();
   const host = document.createElement("div");
   host.id = "kb-adm-test-host";
@@ -416,7 +416,7 @@ const SETTINGS_TAB_REGISTERED = () => {
   const ids = [...(s?.pluginTabs || []), ...(s?.settingTabs || [])].map(
     (t) => t?.id ?? t?.plugin?.manifest?.id ?? null
   );
-  return JSON.stringify({ 有kb_home: ids.includes("kb-home"), 全部: ids.slice(0, 20) });
+  return JSON.stringify({ 有kb_home: ids.includes("sun-home"), 全部: ids.slice(0, 20) });
 };
 
 async function waitReady(ctx, ms = 30000) {

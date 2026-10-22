@@ -172,6 +172,20 @@ export class KbTreeView extends ItemView {
     this.render();
   }
 
+  /** 文件夹改名 / 移动后跟随新路径；当前库在旧路径之下时同步更新 */
+  public handlePathRenamed(oldPath: string, newPath: string): void {
+    if (!this.currentPath) return;
+    if (this.currentPath !== oldPath && !this.currentPath.startsWith(oldPath + "/")) return;
+
+    this.currentPath =
+      this.currentPath === oldPath
+        ? newPath
+        : newPath + this.currentPath.slice(oldPath.length);
+    // 折叠状态按旧路径存，改名后直接清掉，避免整棵树错位折叠
+    this.collapsed.clear();
+    this.render();
+  }
+
   public refresh(): void {
     this.render();
   }
@@ -822,9 +836,8 @@ export class KbTreeView extends ItemView {
             new Notice(`已存在：${newPath}`);
             return;
           }
+          // 路径同步由插件的 rename 事件统一处理（currentPath 也会跟着走）
           await this.app.fileManager.renameFile(folder, newPath);
-          // 若重命名的是当前知识库根，更新引用
-          if (this.currentPath === folder.path) this.currentPath = newPath;
         })
     );
 

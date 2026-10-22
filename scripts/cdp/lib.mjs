@@ -2,7 +2,7 @@
 // 因此函数体内只能引用页面全局，不能用 Node 闭包变量）
 export const INSTALL = () => {
   const app = window.app;
-  const plugin = app.plugins.plugins["kb-home"];
+  const plugin = app.plugins.plugins["sun-home"];
   const leaf = app.workspace.getLeavesOfType("kb-tree-view")[0];
   const view = leaf?.view;
   // 认 getViewType，不认类名：压缩后类名可能带上前缀（曾整批用例因此误判「未实体化」）
@@ -71,7 +71,7 @@ export const EVENTS = () => window.__probe.events.slice();
 export const ROWS = () => {
   const view = window.app.workspace.getLeavesOfType("kb-tree-view")[0]?.view;
   if (view?.getViewType?.() !== "kb-tree-view") return { err: "no kb-tree-view" };
-  const order = window.app.plugins.plugins["kb-home"].settings.order.items[view.currentPath];
+  const order = window.app.plugins.plugins["sun-home"].settings.order.items[view.currentPath];
   return {
     currentPath: view.currentPath,
     autoReveal: view.autoReveal,
@@ -98,7 +98,7 @@ export const READY = () => {
   const app = window.app;
   return {
     新文档: typeof window.__beforeReload === "undefined",
-    ready: typeof window.__beforeReload === "undefined" && !!app?.plugins?.plugins?.["kb-home"],
+    ready: typeof window.__beforeReload === "undefined" && !!app?.plugins?.plugins?.["sun-home"],
     cards: document.querySelectorAll(".kb-card").length,
     explorerRows: document.querySelectorAll(
       '[data-type="file-explorer"] .nav-file-title, [data-type="file-explorer"] .nav-folder-title'

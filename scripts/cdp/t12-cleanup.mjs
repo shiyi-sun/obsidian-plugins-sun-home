@@ -8,7 +8,8 @@ async function waitReady(ctx, ms = 30000) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
     const r = await ctx.page(READY);
-    if (r.新文档 && r.ready && r.cards > 0) return r;
+    // 清理后的干净 vault 可能一张卡片都没有，这里只要求插件就绪
+    if (r.新文档 && r.ready) return r;
     await sleep(700);
   }
   throw new Error("超时");
@@ -20,7 +21,7 @@ export default async (ctx) => {
   // 1) 设置里清掉测试痕迹（分组、顺序项、隐藏/置顶项、卡片归属）
   rep.清理结果 = await ctx.page(
     (box, hints) => {
-      const p = window.app.plugins.plugins["kb-home"];
+      const p = window.app.plugins.plugins["sun-home"];
       const s = p.settings;
       s.groups = (s.groups || []).filter((g) => !hints.some((h) => g.name.startsWith(h)));
       if (s.ungroupedOrder) s.ungroupedOrder = s.ungroupedOrder.filter((x) => x !== box);
@@ -48,7 +49,7 @@ export default async (ctx) => {
   // 2) 磁盘上确认干净
   rep.磁盘 = await ctx.page(
     (box) =>
-      window.app.vault.adapter.read(".obsidian/plugins/kb-home/data.json").then((t) => {
+      window.app.vault.adapter.read(".obsidian/plugins/sun-home/data.json").then((t) => {
         const d = JSON.parse(t);
         return {
           沙箱痕迹: Object.keys(d.order?.items || {}).filter((k) => k.startsWith(box)),
@@ -101,7 +102,7 @@ export default async (ctx) => {
   await ctx.reloadApp();
   rep.重启后就绪 = await waitReady(ctx);
   rep.重启后状态 = await ctx.page(() => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     const ws = window.app.workspace;
     return {
       版本: p?.manifest?.version,

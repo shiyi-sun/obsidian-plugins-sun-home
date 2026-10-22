@@ -48,7 +48,7 @@ const RECORDER = () => {
 
 const TREE = () => {
   const view = window.app.workspace.getLeavesOfType("kb-tree-view")[0]?.view;
-  const p = window.app.plugins.plugins["kb-home"];
+  const p = window.app.plugins.plugins["sun-home"];
   const items = p.settings.order.items;
   return {
     // 顺序与原生树共用一份存储：order.items[文件夹] 的 sortOrder / customOrder
@@ -135,7 +135,7 @@ async function dragTo(ctx, srcRect, dstRect, ratio, holdMs = 120) {
 /** 复位：把沙箱库（含子文件夹）的排序方式统一设成名称升序，与原生树共用同一份设置 */
 const RESET_STATE = (box) =>
   (async () => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     const v = window.app.workspace.getLeavesOfType("kb-tree-view")[0].view;
     v.collapsed.clear();
     // 直接走真实入口（TS 的 private 在运行时不拦），不再另设测试专用钩子
@@ -350,7 +350,7 @@ export default async (ctx) => {
       const v = window.app.workspace.getLeavesOfType("kb-tree-view")[0].view;
       v.applySortOrder(window.app.vault.getAbstractFileByPath(box), "byNameAsc");
       v.applySortOrder(window.app.vault.getAbstractFileByPath(b), "byNameAsc");
-      return window.app.plugins.plugins["kb-home"].saveSettingsNow();
+      return window.app.plugins.plugins["sun-home"].saveSettingsNow();
     }, SANDBOX, B);
     await sleep(300);
 
@@ -556,7 +556,7 @@ export default async (ctx) => {
   await safe("阶段8.5同一份存储", async () => {
     const 手排 = ["说明.md", "子文件夹B", "根笔记1.md", "根笔记2.md", "根笔记3.md", "子文件夹A"];
     await ctx.page((box, order) => {
-      const p = window.app.plugins.plugins["kb-home"];
+      const p = window.app.plugins.plugins["sun-home"];
       const f = p.settings.order.items[box];
       f.customOrder = order;
       f.sortOrder = "custom";
@@ -629,7 +629,7 @@ export default async (ctx) => {
         })
         .map((c) => c.name);
       return {
-        库排序: window.app.plugins.plugins["kb-home"].settings.order.items[box]?.sortOrder ?? null,
+        库排序: window.app.plugins.plugins["sun-home"].settings.order.items[box]?.sortOrder ?? null,
         屏幕顺序: 屏幕,
         期望,
       };

@@ -53,7 +53,7 @@ export default async (ctx) => {
   await ctx.page(MARK_RELOAD);
   await ctx.reloadApp();
   rep.ready = await waitReady(ctx);
-  const before = await ctx.page(() => ({ order: JSON.parse(JSON.stringify(window.app.plugins.plugins["kb-home"].settings.order)) }));
+  const before = await ctx.page(() => ({ order: JSON.parse(JSON.stringify(window.app.plugins.plugins["sun-home"].settings.order)) }));
 
   await ctx.page(() => {
     const ws = window.app.workspace;
@@ -84,7 +84,7 @@ export default async (ctx) => {
 
   // ---------- 1. customOrder ----------
   await ctx.page((parent) => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     p.settings.order.items[parent] = { ...(p.settings.order.items[parent] || {}), sortOrder: "custom", customOrder: ["笔记A2.md", "笔记A1.md"] };
     p.sortFeature.syncRuntimeSettings();
     return p.saveSettingsNow().then(() => {
@@ -110,13 +110,13 @@ export default async (ctx) => {
   await ctx.click(Math.round(nameAsc.x + nameAsc.w / 2), Math.round(nameAsc.y + nameAsc.h / 2));
   await sleep(1000);
   const c2 = await ctx.page(STATE, `${SUBA}/`);
-  const st2 = await ctx.page((parent) => window.app.plugins.plugins["kb-home"].settings.order.items[parent].sortOrder, SUBA);
+  const st2 = await ctx.page((parent) => window.app.plugins.plugins["sun-home"].settings.order.items[parent].sortOrder, SUBA);
   rep.名称序 = { 子项: c2.子项, sortOrder: st2 };
   add("右键「排序方式 → 名称 A → Z」把顺序换回 A1 在前并落盘", c2.子项[0] === A1 && st2 === "byNameAsc", rep.名称序);
 
   // ---------- 3. 置顶（原生浏览器内）----------
   await ctx.page((parent, a2) => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     p.settings.order.items[a2] = { ...(p.settings.order.items[a2] || {}), isPinned: true };
     p.sortFeature.syncRuntimeSettings();
     return p.saveSettingsNow().then(() => {
@@ -131,7 +131,7 @@ export default async (ctx) => {
 
   // ---------- 4. 收尾 ----------
   await ctx.page((snap) => {
-    const p = window.app.plugins.plugins["kb-home"];
+    const p = window.app.plugins.plugins["sun-home"];
     p.settings.order = snap.order;
     p.sortFeature.syncRuntimeSettings();
     return p.saveSettingsNow().then(() => {
