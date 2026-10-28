@@ -130,7 +130,7 @@ function retireShell(shell: HTMLElement): void {
 /* ------------------------------------------------------------------ */
 
 function buildBlock(open: ParsedOpen): { block: HTMLElement; contentEl: HTMLElement } {
-  const block = document.createElement("div");
+  const block = createDiv();
   block.addClass(CLS, `${CLS}-${open.type}`);
   block.setAttr("data-admonition-type", open.type);
 
@@ -143,12 +143,17 @@ function buildBlock(open: ParsedOpen): { block: HTMLElement; contentEl: HTMLElem
     heading.setAttr("tabindex", "0");
 
     const arrow = heading.createSpan({ cls: `${CLS}-arrow` });
-    arrow.innerHTML =
-      '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"></path></svg>';
+    const arrowSvg = arrow.createSvg("svg", {
+      attr: { viewBox: "0 0 24 24", width: "16", height: "16" },
+    });
+    arrowSvg.createSvg("path", {
+      attr: { fill: "currentColor", d: "M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" },
+    });
   }
 
   const iconWrap = heading.createDiv({ cls: `${CLS}-icon` });
-  iconWrap.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON_PATHS[open.type]}"></path></svg>`;
+  const icon = iconWrap.createSvg("svg", { attr: { viewBox: "0 0 24 24", "aria-hidden": "true" } });
+  icon.createSvg("path", { attr: { d: ICON_PATHS[open.type] } });
 
   const headingText = heading.createDiv({ cls: `${CLS}-heading-text` });
   headingText.setText(open.title ?? DEFAULT_TITLE[open.type]);
@@ -207,9 +212,9 @@ export function renderAdmonitionsInSection(root: HTMLElement): void {
 
       const flush = () => {
         if (buffer.length === 0) return;
-        const p = document.createElement("p");
+        const p = createEl("p");
         buffer.forEach((n, i) => {
-          if (i > 0) p.appendChild(document.createElement("br"));
+          if (i > 0) p.appendChild(createEl("br"));
           p.appendChild(n);
         });
         buffer = [];

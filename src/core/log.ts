@@ -5,7 +5,6 @@ export const initLog =
   (scope: string, color: string) =>
   (...args: unknown[]): void => {
     if (logger.level === "silent") return;
-    // eslint-disable-next-line no-console
     window.console.log(`%c${scope}`, buildStyles(color), ...args);
   };
 

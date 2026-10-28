@@ -120,7 +120,7 @@ export class SortFeature {
 
   private observeExplorer(): void {
     // 兜底：若因故文件浏览器一直未挂载，10 秒后也要解除静默，避免永久不响应事件
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (this.suspended) {
         this.log("Explorer not mounted within 10s, force-resuming events");
         this.suspended = false;
@@ -176,7 +176,7 @@ export class SortFeature {
     for (const ref of this.vaultEventRefs) {
       try {
         this.app.vault.offref(ref);
-      } catch (err) {
+      } catch {
         // 忽略：可能已被自动清理
       }
     }

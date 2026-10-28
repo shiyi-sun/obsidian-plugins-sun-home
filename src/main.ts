@@ -41,6 +41,7 @@ import { SortFeature } from "./core/sort-feature";
 import { FeatureRegistry, featureContext } from "./framework/feature";
 import { AdmonitionFeature, DEFAULT_ADMONITION } from "./features/admonition";
 import { SortOrderFeature } from "./features/sort-order";
+import { revealInSystem } from "./system";
 
 export default class KbHomePlugin extends Plugin {
   settings: KbSettings;
@@ -327,22 +328,22 @@ export default class KbHomePlugin extends Plugin {
 
     // 左侧 ribbon 图标：打开知识库列表
     this.addRibbonIcon("library", "打开知识库列表", () => {
-      this.openKbHome();
+      void this.openKbHome();
     });
     this.addRibbonIcon("folder-tree", "打开当前知识库目录", () => {
-      this.openTreeForActive();
+      void this.openTreeForActive();
     });
 
     // 命令
     this.addCommand({
       id: "open-kb-home",
       name: "打开知识库列表",
-      callback: () => this.openKbHome(),
+      callback: () => void this.openKbHome(),
     });
     this.addCommand({
       id: "open-kb-tree-active",
       name: "打开当前笔记所在知识库的目录",
-      callback: () => this.openTreeForActive(),
+      callback: () => void this.openTreeForActive(),
     });
     this.addCommand({
       id: "migrate-legacy-groups",
@@ -386,7 +387,7 @@ export default class KbHomePlugin extends Plugin {
       }
       try {
         if (this.settings.openOnStartup) {
-          this.openKbHome();
+          void this.openKbHome();
         }
       } catch (err) {
         console.error("[sun-home] 启动时打开知识库列表失败：", err);
@@ -400,7 +401,7 @@ export default class KbHomePlugin extends Plugin {
     });
   }
 
-  async onunload() {
+  onunload(): void {
     // 卸载时把我们的视图从工作区摘除。
     // 视图由 registerView 注册，正常情况下 Obsidian 会自动处理；
     // 这里保留 detach 是为了「用户手动禁用插件」时立刻清掉面板。
@@ -440,7 +441,7 @@ export default class KbHomePlugin extends Plugin {
       if (leaves.length > 0) {
         const leaf = leaves[0];
         workspace.setActiveLeaf(leaf, { focus: true });
-        workspace.revealLeaf(leaf);
+        void workspace.revealLeaf(leaf);
         (leaf.view as KbHomeView)?.refresh?.();
         return;
       }
@@ -459,7 +460,7 @@ export default class KbHomePlugin extends Plugin {
 
       await leaf.setViewState({ type: VIEW_TYPE_KB_HOME, active: true });
       workspace.setActiveLeaf(leaf, { focus: true });
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
     } catch (err) {
       console.error("[sun-home] 打开知识库列表失败：", err);
     }
@@ -484,7 +485,7 @@ export default class KbHomePlugin extends Plugin {
       if (view instanceof KbTreeView) {
         view.showKb(kb.path);
       }
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
     } catch (err) {
       console.error("[sun-home] 打开知识库目录失败：", err);
     }
@@ -589,7 +590,7 @@ export default class KbHomePlugin extends Plugin {
 
   /** 从旧插件 id（kb-home）的 data.json 迁移一次配置 */
   private async loadLegacyPluginData(): Promise<Record<string, unknown> | null> {
-    const oldPath = ".obsidian/plugins/kb-home/data.json";
+    const oldPath = joinPath(this.app.vault.configDir, "plugins/kb-home/data.json");
     try {
       const adapter = this.app.vault.adapter;
       if (!(await adapter.exists(oldPath))) return null;
@@ -599,7 +600,6 @@ export default class KbHomePlugin extends Plugin {
         return null;
       }
       await this.saveData(parsed);
-      console.info("[sun-home] 已从旧插件目录 kb-home 迁移配置");
       new Notice("已从旧插件名 kb-home 迁移配置到 sun-home");
       return parsed as Record<string, unknown>;
     } catch (err) {
@@ -626,11 +626,11 @@ export default class KbHomePlugin extends Plugin {
    * 或后续操作刷新，没必要每次都重建 DOM；且连续事件会触发大量整份 JSON 写盘，
    * 是启动缓慢的主因之一。这里做 300ms 防抖合并，把连续写入压成一次。
    */
-  private pendingSave: ReturnType<typeof setTimeout> | null = null;
+  private pendingSave: number | null = null;
 
   saveSettingsDebounced(): void {
-    if (this.pendingSave !== null) clearTimeout(this.pendingSave);
-    this.pendingSave = setTimeout(() => {
+    if (this.pendingSave !== null) window.clearTimeout(this.pendingSave);
+    this.pendingSave = window.setTimeout(() => {
       this.pendingSave = null;
       void this.persist();
     }, 300);
@@ -639,7 +639,7 @@ export default class KbHomePlugin extends Plugin {
   /** 立即冲刷挂起的保存（卸载/退出前调用，避免丢数据） */
   flushPendingSave(): void {
     if (this.pendingSave !== null) {
-      clearTimeout(this.pendingSave);
+      window.clearTimeout(this.pendingSave);
       this.pendingSave = null;
       void this.persist();
     }
@@ -651,7 +651,7 @@ export default class KbHomePlugin extends Plugin {
    */
   async saveSettingsNow(): Promise<void> {
     if (this.pendingSave !== null) {
-      clearTimeout(this.pendingSave);
+      window.clearTimeout(this.pendingSave);
       this.pendingSave = null;
     }
     await this.persist();
@@ -804,8 +804,7 @@ class MigrationModal extends Modal {
       text: `共会移动 ${total} 个知识库文件夹。分组名与现有文件夹重名时会自动加序号。`,
     });
 
-    const status = contentEl.createEl("p", { cls: "kb-modal-desc" });
-    status.style.whiteSpace = "pre-wrap";
+    const status = contentEl.createEl("p", { cls: "kb-modal-desc kb-modal-status" });
     const btns = contentEl.createDiv({ cls: "kb-modal-buttons" });
     const start = btns.createEl("button", { text: "开始迁移", cls: "mod-cta" });
     const later = btns.createEl("button", { text: "稍后" });
@@ -917,21 +916,8 @@ class KbEditModal extends Modal {
     // 打开所在文件夹
     new Setting(contentEl).addButton((b) =>
       b.setButtonText("在系统资源管理器中打开").onClick(() => {
-        const adapter: any = this.app.vault.adapter;
-        if (adapter && typeof adapter.getFullPath === "function") {
-          const full = adapter.getFullPath(this.kb.path);
-          try {
-            // 仅在桌面端可用；动态引入避免移动端打包报错
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const electron = (window as any).require?.("electron");
-            if (electron?.shell?.openPath) {
-              electron.shell.openPath(full);
-            } else {
-              new Notice("当前环境不支持打开文件夹");
-            }
-          } catch (e) {
-            new Notice("打开文件夹失败：" + String(e));
-          }
+        if (!revealInSystem(this.app, this.kb.path, "open")) {
+          new Notice("当前环境不支持打开文件夹");
         }
         this.close();
       })
@@ -957,7 +943,7 @@ class KbSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "知识库管理设置" });
+    new Setting(containerEl).setName("知识库管理设置").setHeading();
 
     new Setting(containerEl)
       .setName("启动时自动打开知识库列表")
@@ -1004,7 +990,7 @@ class KbSettingTab extends PluginSettingTab {
       const legacy = this.plugin.settings.groups.filter((g) => !g.path);
       const plan = planLegacyMigration(this.app, this.plugin.settings);
       const moving = plan.reduce((n, item) => n + item.members.length, 0);
-      containerEl.createEl("h3", { text: "旧分组迁移" });
+      new Setting(containerEl).setName("旧分组迁移").setHeading();
       containerEl.createEl("p", {
         cls: "kb-setting-hint",
         text: `还有 ${legacy.length} 个旧版虚拟分组，共 ${moving} 个知识库需要搬进真实分组文件夹。迁移会真实移动文件夹，并同步更新排序、隐藏与名称记录；不会删除任何笔记。`,
@@ -1017,7 +1003,7 @@ class KbSettingTab extends PluginSettingTab {
         );
     }
 
-    containerEl.createEl("h3", { text: "分组管理" });
+    new Setting(containerEl).setName("分组管理").setHeading();
     containerEl.createEl("p", {
       cls: "kb-setting-hint",
       text: "分组就是 vault 根目录下的一层真实文件夹，组内知识库是它的直接子文件夹。重命名/删除分组会直接操作这个文件夹。",
@@ -1104,7 +1090,7 @@ class KbSettingTab extends PluginSettingTab {
     this.plugin.features.renderSettings(containerEl);
 
     // 调试日志是插件级的（logger 全局），所以留在主体而不在某个功能里
-    containerEl.createEl("h3", { text: "调试" });
+    new Setting(containerEl).setName("调试").setHeading();
     new Setting(containerEl)
       .setName("开启调试日志")
       .setDesc("在开发者控制台输出详细日志，排查问题时使用")

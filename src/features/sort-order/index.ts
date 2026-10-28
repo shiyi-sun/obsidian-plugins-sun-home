@@ -111,7 +111,7 @@ export class SortOrderFeature implements Feature {
         })
       );
 
-    containerEl.createEl("h3", { text: "隐藏规则（glob）" });
+    new Setting(containerEl).setName("隐藏规则（glob）").setHeading();
     containerEl.createEl("p", {
       cls: "kb-setting-hint",
       text: "每行一条规则，支持 gitignore 风格通配符。例如：*.tmp 隐藏所有 tmp 文件；草稿/** 隐藏「草稿」文件夹；/私密.md 只隐藏根目录下的「私密.md」。",
@@ -132,7 +132,7 @@ export class SortOrderFeature implements Feature {
       engine()?.sortExplorer();
     });
 
-    containerEl.createEl("h3", { text: "调试" });
+    new Setting(containerEl).setName("调试").setHeading();
     new Setting(containerEl)
       .setName("开启调试日志")
       .setDesc("在开发者控制台输出详细日志，排查问题时使用")
@@ -152,7 +152,7 @@ export class SortOrderFeature implements Feature {
    * 这样用户不必先打开全局「显示被隐藏的文件」再在半透明条目里翻找。
    */
   private renderHiddenItemsList(containerEl: HTMLElement, ctx: FeatureContext): void {
-    containerEl.createEl("h3", { text: "已隐藏的项目" });
+    new Setting(containerEl).setName("已隐藏的项目").setHeading();
 
     const items = ctx.settings().order.items;
     const hiddenPaths = Object.keys(items).filter((p) => items[p]?.isHidden);

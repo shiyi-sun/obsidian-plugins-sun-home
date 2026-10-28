@@ -62,12 +62,44 @@
 }
 
 .kb-group-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 2px 2px 8px;
   cursor: pointer;
   user-select: none;
+}
+
+.kb-group-header[draggable="true"] {
+  cursor: grab;
+}
+
+.kb-group-header[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.kb-group-dragging {
+  opacity: 0.45;
+}
+
+.kb-group-header.kb-group-drop-before::before,
+.kb-group-header.kb-group-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+}
+
+.kb-group-header.kb-group-drop-before::before {
+  top: -3px;
+}
+
+.kb-group-header.kb-group-drop-after::after {
+  bottom: -3px;
 }
 
 .kb-group-toggle {
@@ -127,7 +159,7 @@
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   grid-template-areas: "icon name count";
-  column-gap: 10px;
+  gap: 10px;
   align-items: center;
 }
 
@@ -385,6 +417,10 @@
   margin-top: -4px;
 }
 
+.kb-modal-status {
+  white-space: pre-wrap;
+}
+
 .kb-modal-input {
   width: 100%;
   padding: 8px 10px;
@@ -489,7 +525,7 @@ body.kb-show-hidden .nav-files-container .tree-item.kb-hidden {
 /* 原生树里由插件自己实现边缘滚动，要先禁掉 Chromium 的原生自动滚动；
    单库树没有自建滚动，反过来要保留它，所以这条只作用于原生树 */
 body.kb-dragging [data-type="file-explorer"] .nav-files-container {
-  overflow: hidden !important;
+  overflow: hidden;
 }
 
 /* 下面的放置指示由两棵树共用：原生树的容器和单库树都带 nav-files-container */

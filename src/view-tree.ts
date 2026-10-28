@@ -7,10 +7,13 @@ import {
   Menu,
   Notice,
   setIcon,
+  type Vault,
+  type ViewStateResult,
 } from "obsidian";
 import type KbHomePlugin from "./main";
 import { SORT_OPTIONS } from "./core/menu";
-import { isFolderSettings, type FolderSettings, type SortOrder } from "./core/order-types";
+import type { SortOrder } from "./core/order-types";
+import { revealInSystem } from "./system";
 
 export const VIEW_TYPE_KB_TREE = "kb-tree-view";
 
@@ -19,6 +22,12 @@ type DropSide = "before" | "after" | "inside";
 
 /** 拖拽时悬停在折叠文件夹上多久自动展开（与原生一致） */
 const EXPAND_DELAY_MS = 1000;
+
+/** Vault 上未进公开类型的两个方法；运行时存在时才调用 */
+type VaultCompat = {
+  getAbstractFileByPathInsensitive?: (path: string) => TAbstractFile | null;
+  getAvailablePath: (path: string, extension: string) => string;
+};
 
 /**
  * 单库树视图：点卡片后，左侧栏只显示这一个知识库的内部树。
@@ -84,12 +93,13 @@ export class KbTreeView extends ItemView {
     };
   }
 
-  async setState(state: any, _result: any): Promise<void> {
+  async setState(state: Record<string, unknown>, _result: ViewStateResult): Promise<void> {
     if (state) {
-      this.currentPath = state.currentPath ?? this.currentPath;
-      this.autoReveal = state.autoReveal ?? this.autoReveal;
-      if (Array.isArray(state.collapsed)) {
-        this.collapsed = new Set(state.collapsed);
+      if (typeof state.currentPath === "string") this.currentPath = state.currentPath;
+      if (typeof state.autoReveal === "boolean") this.autoReveal = state.autoReveal;
+      const collapsed = state.collapsed;
+      if (Array.isArray(collapsed)) {
+        this.collapsed = new Set(collapsed.filter((p): p is string => typeof p === "string"));
       }
     }
     this.render();
@@ -384,7 +394,7 @@ export class KbTreeView extends ItemView {
     const header = host.createDiv({ cls: "kb-tree-header nav-header" });
 
     const back = header.createEl("span", { cls: "kb-tree-back", text: "← 全部知识库" });
-    back.onclick = () => this.plugin.openKbHome();
+    back.onclick = () => void this.plugin.openKbHome();
 
     const titleRow = header.createDiv({ cls: "kb-tree-title-row" });
     const title = titleRow.createEl("div", { cls: "kb-tree-title", text: folder.name });
@@ -694,10 +704,10 @@ export class KbTreeView extends ItemView {
    * 拖拽进行中不能整棵树重绘：那会把正在拖的源节点连监听一起拆掉，这次拖拽就废了。
    */
   private expandInPlace(path: string): void {
-    const self = this.containerEl.querySelector<HTMLElement>(
+    const titleEl = this.containerEl.querySelector<HTMLElement>(
       `.kb-tree-body .nav-folder-title[data-path="${path}"]`
     );
-    const item = self?.closest<HTMLElement>(".tree-item");
+    const item = titleEl?.closest<HTMLElement>(".tree-item");
     const folder = this.app.vault.getAbstractFileByPath(path);
     if (!item || !(folder instanceof TFolder)) return;
     this.collapsed.delete(path);
@@ -777,7 +787,7 @@ export class KbTreeView extends ItemView {
   /** 目标处已有同名项时像原生一样自动避让改名（xx → xx 1），而不是拒绝这次移动 */
   private availablePath(item: TAbstractFile, destFolder: TFolder): string {
     const target = `${destFolder.path}/${item.name}`;
-    const vault = this.app.vault as any;
+    const vault = this.app.vault as Vault & VaultCompat;
     const clash =
       (typeof vault.getAbstractFileByPathInsensitive === "function"
         ? vault.getAbstractFileByPathInsensitive(target)
@@ -849,9 +859,9 @@ export class KbTreeView extends ItemView {
           const count = this.countFiles(folder);
           this.plugin.confirmModal(
             "删除文件夹",
-            `确定删除「${folder.name}」及其中的 ${count} 个文件吗？此操作不可撤销。`,
+            `确定删除「${folder.name}」及其中的 ${count} 个文件吗？会按你的「删除文件」设置移入回收站或永久删除。`,
             async () => {
-              await this.app.vault.delete(folder, true);
+              await this.app.fileManager.trashFile(folder);
               if (this.currentPath === folder.path) {
                 this.currentPath = null;
                 this.render();
@@ -989,21 +999,8 @@ export class KbTreeView extends ItemView {
 
   /** 在系统资源管理器中定位文件/文件夹 */
   private revealInOS(target: TAbstractFile): void {
-    const adapter: any = this.app.vault.adapter;
-    if (adapter && typeof adapter.getFullPath === "function") {
-      const full: string = adapter.getFullPath(target.path);
-      try {
-        const electron = (window as any).require?.("electron");
-        if (electron?.shell?.showItemInFolder) {
-          electron.shell.showItemInFolder(full);
-        } else if (electron?.shell?.openPath) {
-          electron.shell.openPath(full);
-        } else {
-          new Notice("当前环境不支持在资源管理器中打开");
-        }
-      } catch (err) {
-        new Notice("打开失败：" + String(err));
-      }
+    if (!revealInSystem(this.app, target.path, "reveal")) {
+      new Notice("当前环境不支持在资源管理器中打开");
     }
   }
 

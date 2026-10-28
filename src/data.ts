@@ -589,11 +589,10 @@ export async function dissolveGroup(
 
     if (empty) {
       try {
-        // 这个版本的 Obsidian 对空目录调用 delete(file) / rmdir(path, false)
-        // 会落到 fs.rm 并报 EISDIR，必须显式 recursive（此时已确认目录是空的）
-        await app.vault.delete(folder, true);
+        // 走 Obsidian 的删除入口，尊重用户的「回收站 / 永久删除」偏好
+        await app.fileManager.trashFile(folder);
         result.folderDeleted = true;
-      } catch (err) {
+      } catch {
         try {
           await app.vault.adapter.rmdir(folder.path, true);
           result.folderDeleted = true;

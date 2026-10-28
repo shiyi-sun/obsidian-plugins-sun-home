@@ -1,4 +1,11 @@
-import { ItemView, WorkspaceLeaf, TFile, Menu, setIcon } from "obsidian";
+import {
+  ItemView,
+  WorkspaceLeaf,
+  Menu,
+  setIcon,
+  type MenuItem,
+  type ViewStateResult,
+} from "obsidian";
 import type KbHomePlugin from "./main";
 import {
   KnowledgeBase,
@@ -12,6 +19,8 @@ import {
 
 export const VIEW_TYPE_KB_HOME = "kb-home-view";
 
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 /**
  * 知识库列表页：语雀风格的卡片墙。
  * 分组标题 + 卡片网格；支持拖拽排序、分组折叠、新建知识库。
@@ -20,6 +29,7 @@ export class KbHomeView extends ItemView {
   plugin: KbHomePlugin;
   private collapsed: Set<string> = new Set();
   private dragPath: string | null = null;
+  private dragGroupId: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: KbHomePlugin) {
     super(leaf);
@@ -43,9 +53,10 @@ export class KbHomeView extends ItemView {
     return { collapsed: Array.from(this.collapsed) };
   }
 
-  async setState(state: any, _result: any): Promise<void> {
-    if (state && Array.isArray(state.collapsed)) {
-      this.collapsed = new Set(state.collapsed);
+  async setState(state: Record<string, unknown>, _result: ViewStateResult): Promise<void> {
+    const collapsed = state?.collapsed;
+    if (Array.isArray(collapsed)) {
+      this.collapsed = new Set(collapsed.filter((p): p is string => typeof p === "string"));
     }
     this.render();
   }
@@ -173,6 +184,8 @@ export class KbHomeView extends ItemView {
 
       // 分组重命名 / 删除（未分组不允许）
       if (!isUngrouped) {
+        this.attachGroupDrag(header, group);
+
         const tools = header.createDiv({ cls: "kb-group-tools" });
         const ren = tools.createEl("span", { cls: "kb-group-tool", text: "✎" });
         ren.onclick = (e) => {
@@ -215,7 +228,7 @@ export class KbHomeView extends ItemView {
 
       // 名称行
       const nameRow = card.createDiv({ cls: "kb-card-name-row" });
-      const nameEl = nameRow.createEl("span", { cls: "kb-card-name", text: kb.name });
+      nameRow.createEl("span", { cls: "kb-card-name", text: kb.name });
 
       // 悬停操作
       const tools = nameRow.createDiv({ cls: "kb-card-tools" });
@@ -289,6 +302,85 @@ export class KbHomeView extends ItemView {
     // 新版分组会真实移动文件夹；旧虚拟分组只改归属，插件内部已分流
     await this.plugin.moveKbToGroup(kbPath, groupId);
     this.render();
+  }
+
+  /** 拖动分组标题可调整分组之间的显示顺序；「未分组」固定在末尾，不参与排序 */
+  private attachGroupDrag(header: HTMLElement, group: KnowledgeGroup): void {
+    header.setAttribute("draggable", "true");
+
+    header.addEventListener("dragstart", (e) => {
+      this.dragGroupId = group.id;
+      header.addClass("kb-group-dragging");
+      e.dataTransfer?.setData("text/plain", `group:${group.id}`);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      e.stopPropagation();
+    });
+
+    header.addEventListener("dragend", () => {
+      this.dragGroupId = null;
+      header.removeClass("kb-group-dragging");
+      this.clearGroupOrderMarks();
+    });
+
+    header.addEventListener("dragover", (e) => {
+      if (!this.dragGroupId || this.dragGroupId === group.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      const before = this.isDropBeforeHeader(e, header);
+      header.toggleClass("kb-group-drop-before", before);
+      header.toggleClass("kb-group-drop-after", !before);
+    });
+
+    header.addEventListener("dragleave", (e) => {
+      if (header.contains(e.relatedTarget as Node)) return;
+      header.removeClass("kb-group-drop-before");
+      header.removeClass("kb-group-drop-after");
+    });
+
+    header.addEventListener("drop", async (e) => {
+      if (!this.dragGroupId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const before = this.isDropBeforeHeader(e, header);
+      const draggedId = this.dragGroupId;
+      this.dragGroupId = null;
+      header.removeClass("kb-group-dragging");
+      this.clearGroupOrderMarks();
+      if (draggedId === group.id) return;
+      await this.moveGroup(draggedId, group.id, before);
+    });
+  }
+
+  private isDropBeforeHeader(e: DragEvent, header: HTMLElement): boolean {
+    const rect = header.getBoundingClientRect();
+    return (e.clientY ?? 0) < rect.top + rect.height / 2;
+  }
+
+  /** 把 fromId 移到 toId 前面或后面，并落盘 */
+  private async moveGroup(fromId: string, toId: string, before: boolean): Promise<void> {
+    const settings = this.plugin.settings;
+    const groups = settings.groups.slice();
+    const fromIndex = groups.findIndex((g) => g.id === fromId);
+    if (fromIndex < 0) return;
+
+    const [moved] = groups.splice(fromIndex, 1);
+    const targetIndex = groups.findIndex((g) => g.id === toId);
+    if (targetIndex < 0) return;
+
+    groups.splice(before ? targetIndex : targetIndex + 1, 0, moved);
+    settings.groups = groups;
+    await this.plugin.saveSettingsNow();
+    this.render();
+  }
+
+  private clearGroupOrderMarks(): void {
+    this.containerEl
+      .querySelectorAll<HTMLElement>(".kb-group-drop-before, .kb-group-drop-after")
+      .forEach((el) => {
+        el.removeClass("kb-group-drop-before");
+        el.removeClass("kb-group-drop-after");
+      });
   }
 
   /** 给卡片挂上拖拽事件 */
@@ -421,7 +513,7 @@ export class KbHomeView extends ItemView {
           await this.plugin.saveSettingsNow();
           this.render();
         } catch (err) {
-          this.plugin.notice(String((err as Error).message || err));
+          this.plugin.notice(errorText(err));
         }
       }
     );
@@ -440,7 +532,7 @@ export class KbHomeView extends ItemView {
           await this.plugin.createGroup(name.trim());
           this.render();
         } catch (err) {
-          this.plugin.notice(String((err as Error).message || err));
+          this.plugin.notice(errorText(err));
         }
       }
     );
@@ -453,7 +545,7 @@ export class KbHomeView extends ItemView {
         await this.plugin.renameGroup(group, name.trim());
         this.render();
       } catch (err) {
-        this.plugin.notice(String((err as Error).message || err));
+        this.plugin.notice(errorText(err));
       }
     });
   }
@@ -522,8 +614,10 @@ export class KbHomeView extends ItemView {
     menu.addSeparator();
     menu.addItem((item) => {
       item.setTitle("移入分组").setIcon("folder-tree");
-      // setSubmenu 是较新 API，缺失时退化为在当前菜单里平铺
-      const sub: Menu = (item as any).setSubmenu?.() ?? menu;
+      // setSubmenu 未在公开类型里声明；旧版本缺失时退化为在当前菜单里平铺
+      const maybeSubmenu = item as MenuItem & { setSubmenu?: () => Menu };
+      const sub: Menu =
+        typeof maybeSubmenu.setSubmenu === "function" ? maybeSubmenu.setSubmenu() : menu;
       const targets: [string, string][] = [["（未分组）", ""]];
       for (const g of this.plugin.settings.groups) targets.push([g.name, g.id]);
       for (const [label, gid] of targets) {

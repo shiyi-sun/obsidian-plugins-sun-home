@@ -1,5 +1,23 @@
 # sun-kb-home（知识库管理）
 
+## English
+
+Turn the home view into a **knowledge-base card wall**. The default sidebar shows one giant file tree; this plugin splits it into two levels: a card wall of knowledge bases, and the file tree of the one you click.
+
+- **Knowledge base** — a direct subfolder of a group folder, or a root-level folder that is not registered as a group.
+- **Group** — a real folder in the vault root. Creating, renaming, deleting, or dragging into a group moves real folders; `data.json` only stores registrations, ordering, and display overrides. Deleting a group moves its contents back to the vault root and never deletes notes.
+- **Single-vault tree** — clicking a card shows only that knowledge base's tree in the left sidebar. Rows reuse the native `nav-folder` / `nav-file` DOM, so indentation, hover states, hotkeys, and themes keep working.
+- **Card styles** — Settings → sun-kb-home → Card style: bordered, light gray, or divider.
+- **Drag and drop** — reorder cards, drag cards between groups (moves the folder), reorder groups by dragging their headers, and drag items inside the tree.
+- **Sort, pin, hide** — shared with the native file explorer: custom order, pin to top, hide (with glob rules), all stored once in `data.json`.
+- **Callouts** — `:::tip / note / info / warning / danger` blocks render in both Live Preview and Reading view, with optional titles and collapsible variants.
+
+**Install:** copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/sun-home/`, then enable **sun-kb-home** under Settings → Community plugins. Requires Obsidian 1.7.2 or newer. To build from source: `npm install --ignore-scripts && npm run build`.
+
+Licensed under MIT.
+
+## 中文
+
 把 Obsidian 首页变成**知识库卡片墙**：打开 Obsidian 先看到你的知识库列表，点进去才进入该库的树状目录。
 
 ## 解决的问题
@@ -50,6 +68,8 @@ Obsidian 默认左侧是一整棵文件树，所有库的内部分支全挤在�
 - **树内拖拽**：与原生文件树同能力——同级调序、拖进文件夹、**跨文件夹落到某个条目的上/下沿
   即移进那个文件夹**、拖回库根标题即移回根目录、重名自动避让、停在折叠文件夹上一秒自动展开
 - **分组折叠**：点击分组标题可折叠 / 展开
+- **分组排序**：拖动分组标题可调整分组之间的显示顺序，上/下沿会显示落点指示线；
+  顺序写入 `data.json`。「未分组」固定在末尾，不参与分组排序
 - **新建知识库 / 分组**：顶部两个按钮，或右键分组标题（不再在每个分组末尾挂一张虚线新建大卡）
 - **编辑知识库**：卡片悬停出现 `⋯`，可改名、换 emoji 图标、移入分组；移分组同样是真实移动文件夹
 - **旧分组迁移**：首次加载时弹窗确认，把旧版虚拟分组落成真实文件夹，成员知识库连同
@@ -259,7 +279,7 @@ MIT。整合自 Flexplorer 的部分（见上文）仍保留其 MIT 版权声明
 
 ## 兼容性
 
-- `minAppVersion`: 1.4.0
+- `minAppVersion`: 1.7.2
 - 已在 Obsidian 1.14.4 上验证：真实文件夹分组的旧组迁移、新建分组、组内建库、
   跨组拖拽（含拖回根目录）、分组改名 / 删除、单库树路径跟随、编辑弹窗移动分组；
   以及提示块：实时预览渲染、光标进出回退源码、阅读视图渲染、折叠展开、两个开关、增量重算探针

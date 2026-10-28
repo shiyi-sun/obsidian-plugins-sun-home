@@ -1,4 +1,4 @@
-import { Menu, Vault, TFolder, TFile } from "obsidian";
+import { Vault, TFolder } from "obsidian";
 import { initLog } from "./log";
 import { isFolderSettings } from "./order-types";
 import type { OrderSettings, FolderSettings } from "./order-types";
@@ -25,15 +25,15 @@ export class Patcher {
 
   /** patch Vault.copy：复制文件时同步顺序状态 */
   patchVaultCopy(): void {
-    const plugin = this;
+    const { log, orderManager, onExplorerSorted } = this;
     const vaultProto = Vault.prototype as any;
     const origCopy = vaultProto.copy;
 
     vaultProto.copy = async function (file: any, newPath: string) {
-      plugin.log(`Item copied: '${file.path}' -> '${newPath}'`);
-      plugin.orderManager.stageCopyState(file.path, newPath);
+      log(`Item copied: '${file.path}' -> '${newPath}'`);
+      orderManager.stageCopyState(file.path, newPath);
       const copy = await origCopy.call(this, file, newPath);
-      plugin.onExplorerSorted();
+      onExplorerSorted();
       return copy;
     };
 
@@ -48,7 +48,7 @@ export class Patcher {
     const explorerView = this.getExplorerView();
     if (!explorerView) return this.log("Explorer view not found, skipping patch");
 
-    const self = this;
+    const { getSettings, orderManager } = this;
     const explorerProto = Object.getPrototypeOf(explorerView) as any;
     const origGetSortedFolderItems = explorerProto.getSortedFolderItems;
     if (typeof origGetSortedFolderItems !== "function") {
@@ -57,13 +57,13 @@ export class Patcher {
 
     explorerProto.getSortedFolderItems = function (folder: TFolder) {
       const origSorted = origGetSortedFolderItems.call(this, folder);
-      const folderSettings = self.getSettings().items[folder.path] as
+      const folderSettings = getSettings().items[folder.path] as
         | FolderSettings
         | undefined;
       // 文件夹路径上可能只有拆出来的置顶/隐藏条目（例如迁移前手动置顶过文件夹），
       // 它没有 customOrder；直接当 FolderSettings 用会让原生树排序抛异常。
       if (!isFolderSettings(folderSettings)) return origSorted;
-      return self.orderManager.getSortedItems(folderSettings, origSorted);
+      return orderManager.getSortedItems(folderSettings, origSorted);
     };
 
     this.unpatchExplorerSorting = () => {

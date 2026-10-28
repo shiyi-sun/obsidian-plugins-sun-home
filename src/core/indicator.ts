@@ -1,4 +1,4 @@
-import { setIcon, TAbstractFile } from "obsidian";
+import { setIcon } from "obsidian";
 import type { ItemSettings } from "./order-types";
 
 /**

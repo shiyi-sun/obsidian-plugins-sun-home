@@ -19,6 +19,7 @@ const cases = [
   "t11-native2.mjs", // 原生文件浏览器的自定义顺序 / 排序菜单 / 置顶
   "t8-persistence.mjs", // 落盘、重启恢复、ribbon 与命令
   "t14-migration.mjs", // 旧虚拟分组 → 真实文件夹迁移 + 路径状态迁移
+  "t15-group-order.mjs", // 分组标题拖拽调整分组之间的显示顺序
   "t13-admonition.mjs", // 提示块渲染 + 增量重算探针 + 设置页开关
   "t12-cleanup.mjs", // 删除沙箱库并清掉测试写入的设置
 ];

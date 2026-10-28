@@ -83,13 +83,14 @@ class AdmonitionWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     this.probe.widgetDoms++;
     const meta = this.meta;
-    const root = document.createElement("div");
+    const root = createDiv();
     root.addClass("admonition", `admonition-${meta.type}`, "admonition-cm-block");
     root.setAttr("data-admonition-type", meta.type);
 
     const heading = root.createDiv({ cls: "admonition-heading" });
     const iconWrap = heading.createDiv({ cls: "admonition-icon" });
-    iconWrap.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON_PATHS[meta.type]}"></path></svg>`;
+    const icon = iconWrap.createSvg("svg", { attr: { viewBox: "0 0 24 24", "aria-hidden": "true" } });
+    icon.createSvg("path", { attr: { d: ICON_PATHS[meta.type] } });
     const titleEl = heading.createDiv({ cls: "admonition-heading-text" });
     titleEl.setText(meta.title ?? DEFAULT_TITLE[meta.type]);
 
@@ -122,15 +123,15 @@ class AdmonitionWidget extends WidgetType {
     titleEl: HTMLElement,
     child: MarkdownRenderChild
   ): Promise<void> {
-    const holder = document.createElement("div");
+    const holder = createDiv();
     await MarkdownRenderer.render(this.app, this.body, holder, this.sourcePath, child);
     if (!contentEl.isConnected) return;
     contentEl.empty();
     while (holder.firstChild) contentEl.appendChild(holder.firstChild);
 
     const titleSource = this.meta.title;
-    if (titleSource && /[`*_~\[]/.test(titleSource)) {
-      const titleHolder = document.createElement("div");
+    if (titleSource && /[*_~`[\]]/.test(titleSource)) {
+      const titleHolder = createDiv();
       await MarkdownRenderer.render(this.app, titleSource, titleHolder, this.sourcePath, child);
       if (!titleEl.isConnected) return;
       titleEl.empty();

@@ -15,6 +15,7 @@ import {
   MarkdownPostProcessorContext,
   Notice,
   Plugin,
+  Setting,
 } from "obsidian";
 import type { KbSettings } from "../data";
 
@@ -90,7 +91,7 @@ export class FeatureRegistry {
   renderSettings(containerEl: HTMLElement): void {
     for (const f of this.features) {
       if (!f.renderSettings) continue;
-      containerEl.createEl("h2", { text: f.settingsTitle ?? f.id });
+      new Setting(containerEl).setName(f.settingsTitle ?? f.id).setHeading();
       try {
         f.renderSettings(containerEl, this.ctx);
       } catch (err) {
