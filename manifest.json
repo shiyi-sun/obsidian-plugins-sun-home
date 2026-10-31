@@ -1,7 +1,7 @@
 {
   "id": "sun-home",
   "name": "sun-kb-home",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "minAppVersion": "1.7.2",
   "description": "Turn the home view into a knowledge-base card wall with real-folder groups, drag-to-reorder, pinning, and hidden-file support.",
   "author": "sun",
