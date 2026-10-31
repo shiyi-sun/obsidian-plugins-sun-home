@@ -3,6 +3,10 @@ import { initLog } from "./log";
 import type { OrderSettings, FolderSettings } from "./order-types";
 import { OrderManager } from "./order-manager";
 
+/** 文件夹行上/下沿各 30% 用于「排到前/后」，中间 40% 才判定为「移入」 */
+const FOLDER_INSIDE_TOP = 0.3;
+const FOLDER_INSIDE_BOTTOM = 0.7;
+
 /** 供 DnD 引擎回调宿主（插件）能力的接口 */
 export interface DndHost {
   app: App;
@@ -31,6 +35,8 @@ export class DndEngine {
   private explorerRect: DOMRect | null = null;
 
   private draggedItem: TAbstractFile | null = null;
+  /** 本次拖拽涉及的路径（被拖条目 + 多选中的其余条目），不参与落点候选 */
+  private draggingPaths = new Set<string>();
   private dropSibling: HTMLElement | null = null;
   private dropFolder: HTMLElement | null = null;
   private insertSide: "before" | "after" = "before";
@@ -79,6 +85,9 @@ export class DndEngine {
     const view = this.host.getExplorerView();
     this.draggedItem = view?.files?.get(closestTreeItem) ?? null;
     if (!this.draggedItem) return;
+
+    this.draggingPaths = new Set(this.getSelectedItems().map((item) => item.file.path));
+    this.draggingPaths.add(this.draggedItem.path);
 
     this.explorerRect = this.explorerEl!.getBoundingClientRect();
     document.body.classList.add("kb-dragging");
@@ -180,6 +189,7 @@ export class DndEngine {
     this.clearDropIndicators();
 
     this.draggedItem = null;
+    this.draggingPaths.clear();
     this.dropSibling = null;
     this.dropFolder = null;
     this.explorerRect = null;
@@ -232,7 +242,6 @@ export class DndEngine {
         ".tree-item:not(.nav-folder:has(> .tree-item-self:is(.is-being-dragged, .is-selected)) .tree-item)"
       )
     );
-    const firstUnpinnedByParent = new Map<HTMLElement, HTMLElement>();
     let shortestDist = Infinity;
 
     const view = this.host.getExplorerView();
@@ -240,22 +249,17 @@ export class DndEngine {
     for (const candidate of siblingCandidates) {
       const candidateItem = view?.files?.get(candidate);
       if (!candidateItem) continue;
+      // 被拖行/其它选中行本身就是移动对象：拿它当落点，线会画在自己身上看不见
+      if (this.draggingPaths.has(candidateItem.path)) continue;
 
       const isCandidatePinned = this.host.getItemSettings(candidateItem.path).isPinned;
-      const parent = candidate.parentElement!;
-      if (!isCandidatePinned && !firstUnpinnedByParent.has(parent))
-        firstUnpinnedByParent.set(parent, candidate);
-
       if (isDraggedPinned !== isCandidatePinned) continue;
       const areInSameFolder = this.draggedItem!.parent?.path === candidateItem.parent?.path;
       if (isDraggedPinned && !areInSameFolder) continue;
 
       const candidateRect = candidate.getBoundingClientRect();
       const distToBottom = Math.abs(this.pointer.y - this.virtualBottom(candidate, candidateRect));
-      const isFirstUnpinned =
-        candidate.matches(".tree-item:nth-child(1 of .tree-item)") ||
-        (!isDraggedPinned && candidate === firstUnpinnedByParent.get(candidate.parentElement!));
-      const distToTop = isFirstUnpinned ? Math.abs(this.pointer.y - candidateRect.top) : Infinity;
+      const distToTop = Math.abs(this.pointer.y - candidateRect.top);
       const dist = Math.min(distToBottom, distToTop);
 
       if (dist < shortestDist) {
@@ -293,8 +297,9 @@ export class DndEngine {
       const draggedEl = view?.fileItems?.[this.draggedItem!.path]?.el as HTMLElement | undefined;
       const isDraggedFolder = draggedEl ? draggedEl.contains(folderEl) : false;
       const titleRect = closestFolderTitle.getBoundingClientRect();
-      const isTitleCenterHovered =
-        this.pointer.y > titleRect.top + 5 && this.pointer.y < titleRect.bottom - 5;
+      const ratio =
+        titleRect.height > 0 ? (this.pointer.y - titleRect.top) / titleRect.height : 0.5;
+      const isTitleCenterHovered = ratio > FOLDER_INSIDE_TOP && ratio < FOLDER_INSIDE_BOTTOM;
 
       if (isDraggedFolder) {
         this.sparseLog("Hovering over dragged folder or descendant, ignoring");
@@ -314,7 +319,9 @@ export class DndEngine {
 
   private applyDropIndicators(): void {
     if (this.dropSibling) this.dropSibling.dataset.kbDropSibling = this.insertSide;
-    if (this.dropFolder) this.dropFolder.dataset.kbDropFolder = "";
+    // 已在两行之间给出插入线时，不再给父文件夹刷「移入」高亮：
+    // 只有悬停文件夹正中（没有同层落点）才表示要移入。
+    if (this.dropFolder && !this.dropSibling) this.dropFolder.dataset.kbDropFolder = "";
   }
 
   private scheduleFolderExpand(folderEl: HTMLElement): void {

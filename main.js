@@ -1192,12 +1192,17 @@ var KbHomeView = class extends import_obsidian4.ItemView {
   /** 给分组区域挂上拖放处理：把卡片拖到本分组即移入 */
   attachGroupDrop(sec, group) {
     const isUngrouped = group.id === "__ungrouped__";
+    const targetGroupId = isUngrouped ? null : group.id;
     sec.addEventListener("dragover", (e) => {
       var _a, _b;
       if (!this.dragPath)
         return;
       if ((_b = (_a = e.target) == null ? void 0 : _a.closest) == null ? void 0 : _b.call(_a, ".kb-card"))
         return;
+      if (findGroupOf(this.plugin.settings, this.dragPath) === targetGroupId) {
+        sec.removeClass("kb-group-drop-target");
+        return;
+      }
       e.preventDefault();
       if (e.dataTransfer)
         e.dataTransfer.dropEffect = "move";
@@ -1313,23 +1318,27 @@ var KbHomeView = class extends import_obsidian4.ItemView {
     card.addEventListener("dragend", () => {
       this.dragPath = null;
       card.removeClass("kb-card-dragging");
+      this.clearCardDropMarks();
       this.clearGroupDropMarks();
     });
     card.addEventListener("dragover", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (this.dragPath && this.dragPath !== kb.path) {
-        card.addClass("kb-card-drop-target");
-      }
+      if (!this.dragPath || this.dragPath === kb.path)
+        return;
+      this.markCardDrop(card, this.isDropBeforeCard(e, card));
     });
-    card.addEventListener("dragleave", () => {
-      card.removeClass("kb-card-drop-target");
+    card.addEventListener("dragleave", (e) => {
+      if (card.contains(e.relatedTarget))
+        return;
+      this.clearCardDropMark(card);
     });
     card.addEventListener("drop", (e) => {
       var _a, _b;
       e.preventDefault();
       e.stopPropagation();
-      card.removeClass("kb-card-drop-target");
+      const before = this.isDropBeforeCard(e, card);
+      this.clearCardDropMarks();
       const from = this.dragPath;
       if (!from || from === kb.path)
         return;
@@ -1337,17 +1346,43 @@ var KbHomeView = class extends import_obsidian4.ItemView {
       if (((_a = kb.groupId) != null ? _a : null) !== fromGroup) {
         void this.moveToGroup(from, (_b = kb.groupId) != null ? _b : null);
       } else {
-        this.reorder(from, kb.path, group);
+        void this.reorder(from, kb.path, group, before);
       }
       this.dragPath = null;
     });
+  }
+  /** 落点在卡片左半 → 插到它前面；右半 → 插到它后面 */
+  isDropBeforeCard(e, card) {
+    var _a;
+    const rect = card.getBoundingClientRect();
+    return ((_a = e.clientX) != null ? _a : 0) < rect.left + rect.width / 2;
+  }
+  /** 同一时刻只给一张卡片画落点：目标卡描边 + 插入线 */
+  markCardDrop(card, before) {
+    for (const el of Array.from(
+      this.containerEl.querySelectorAll(".kb-card-drop-target")
+    )) {
+      if (el !== card)
+        this.clearCardDropMark(el);
+    }
+    card.addClass("kb-card-drop-target");
+    card.toggleClass("kb-card-drop-before", before);
+    card.toggleClass("kb-card-drop-after", !before);
+  }
+  clearCardDropMark(card) {
+    card.removeClass("kb-card-drop-target");
+    card.removeClass("kb-card-drop-before");
+    card.removeClass("kb-card-drop-after");
+  }
+  clearCardDropMarks() {
+    this.containerEl.querySelectorAll(".kb-card-drop-target").forEach((el) => this.clearCardDropMark(el));
   }
   /** 清掉所有分组的高亮态 */
   clearGroupDropMarks() {
     this.containerEl.querySelectorAll(".kb-group-drop-target").forEach((el) => el.removeClass("kb-group-drop-target"));
   }
-  /** 把 from 移动到 to 前面 */
-  async reorder(from, to, group) {
+  /** 把 from 移动到 to 前面或后面 */
+  async reorder(from, to, group, before) {
     const s = this.plugin.settings;
     const isUngrouped = group.id === "__ungrouped__";
     let order;
@@ -1365,11 +1400,13 @@ var KbHomeView = class extends import_obsidian4.ItemView {
       if (!order.includes(p))
         order.push(p);
     const fi = order.indexOf(from);
-    const ti = order.indexOf(to);
-    if (fi === -1 || ti === -1)
+    if (fi === -1)
       return;
     order.splice(fi, 1);
-    order.splice(ti, 0, from);
+    const ti = order.indexOf(to);
+    if (ti === -1)
+      return;
+    order.splice(before ? ti : ti + 1, 0, from);
     if (isUngrouped) {
       s.ungroupedOrder = order;
     } else {
@@ -2977,6 +3014,8 @@ var Patcher = class {
 
 // src/core/dnd-engine.ts
 var import_obsidian11 = require("obsidian");
+var FOLDER_INSIDE_TOP = 0.3;
+var FOLDER_INSIDE_BOTTOM = 0.7;
 var DndEngine = class {
   constructor(host) {
     this.host = host;
@@ -2985,6 +3024,8 @@ var DndEngine = class {
     this.explorerEl = null;
     this.explorerRect = null;
     this.draggedItem = null;
+    /** 本次拖拽涉及的路径（被拖条目 + 多选中的其余条目），不参与落点候选 */
+    this.draggingPaths = /* @__PURE__ */ new Set();
     this.dropSibling = null;
     this.dropFolder = null;
     this.insertSide = "before";
@@ -3005,6 +3046,8 @@ var DndEngine = class {
       this.draggedItem = (_b = (_a = view == null ? void 0 : view.files) == null ? void 0 : _a.get(closestTreeItem)) != null ? _b : null;
       if (!this.draggedItem)
         return;
+      this.draggingPaths = new Set(this.getSelectedItems().map((item) => item.file.path));
+      this.draggingPaths.add(this.draggedItem.path);
       this.explorerRect = this.explorerEl.getBoundingClientRect();
       document.body.classList.add("kb-dragging");
       this.log(`Started dragging '${this.draggedItem.path}'`);
@@ -3056,6 +3099,7 @@ var DndEngine = class {
       this.clearPendingExpand();
       this.clearDropIndicators();
       this.draggedItem = null;
+      this.draggingPaths.clear();
       this.dropSibling = null;
       this.dropFolder = null;
       this.explorerRect = null;
@@ -3184,17 +3228,15 @@ var DndEngine = class {
         ".tree-item:not(.nav-folder:has(> .tree-item-self:is(.is-being-dragged, .is-selected)) .tree-item)"
       )
     );
-    const firstUnpinnedByParent = /* @__PURE__ */ new Map();
     let shortestDist = Infinity;
     const view = this.host.getExplorerView();
     for (const candidate of siblingCandidates) {
       const candidateItem = (_a = view == null ? void 0 : view.files) == null ? void 0 : _a.get(candidate);
       if (!candidateItem)
         continue;
+      if (this.draggingPaths.has(candidateItem.path))
+        continue;
       const isCandidatePinned = this.host.getItemSettings(candidateItem.path).isPinned;
-      const parent = candidate.parentElement;
-      if (!isCandidatePinned && !firstUnpinnedByParent.has(parent))
-        firstUnpinnedByParent.set(parent, candidate);
       if (isDraggedPinned !== isCandidatePinned)
         continue;
       const areInSameFolder = ((_b = this.draggedItem.parent) == null ? void 0 : _b.path) === ((_c = candidateItem.parent) == null ? void 0 : _c.path);
@@ -3202,8 +3244,7 @@ var DndEngine = class {
         continue;
       const candidateRect = candidate.getBoundingClientRect();
       const distToBottom = Math.abs(this.pointer.y - this.virtualBottom(candidate, candidateRect));
-      const isFirstUnpinned = candidate.matches(".tree-item:nth-child(1 of .tree-item)") || !isDraggedPinned && candidate === firstUnpinnedByParent.get(candidate.parentElement);
-      const distToTop = isFirstUnpinned ? Math.abs(this.pointer.y - candidateRect.top) : Infinity;
+      const distToTop = Math.abs(this.pointer.y - candidateRect.top);
       const dist = Math.min(distToBottom, distToTop);
       if (dist < shortestDist) {
         shortestDist = dist;
@@ -3236,7 +3277,8 @@ var DndEngine = class {
       const draggedEl = (_b = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[this.draggedItem.path]) == null ? void 0 : _b.el;
       const isDraggedFolder = draggedEl ? draggedEl.contains(folderEl) : false;
       const titleRect = closestFolderTitle.getBoundingClientRect();
-      const isTitleCenterHovered = this.pointer.y > titleRect.top + 5 && this.pointer.y < titleRect.bottom - 5;
+      const ratio = titleRect.height > 0 ? (this.pointer.y - titleRect.top) / titleRect.height : 0.5;
+      const isTitleCenterHovered = ratio > FOLDER_INSIDE_TOP && ratio < FOLDER_INSIDE_BOTTOM;
       if (isDraggedFolder) {
         this.sparseLog("Hovering over dragged folder or descendant, ignoring");
       } else if (isTitleCenterHovered) {
@@ -3255,7 +3297,7 @@ var DndEngine = class {
   applyDropIndicators() {
     if (this.dropSibling)
       this.dropSibling.dataset.kbDropSibling = this.insertSide;
-    if (this.dropFolder)
+    if (this.dropFolder && !this.dropSibling)
       this.dropFolder.dataset.kbDropFolder = "";
   }
   scheduleFolderExpand(folderEl) {

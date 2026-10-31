@@ -176,11 +176,14 @@ export default async (ctx) => {
   rep.拖拽后 = await ctx.page(STATE);
   rep.持久化后 = await ctx.page(PERSISTED);
   const expected = [NAMES[1], NAMES[2], NAMES[0]];
+  // 测试库里可能有用户自己的分组（如「的说法」），只比较本次创建的三组
+  const 设置顺序 = rep.拖拽后.settings.filter((n) => NAMES.includes(n));
+  const DOM顺序 = rep.拖拽后.dom.filter((n) => NAMES.includes(n));
   add(
     "放下后分组顺序真实改变，DOM 与 settings.groups 一致",
-    JSON.stringify(rep.拖拽后.settings) === JSON.stringify(expected) &&
-      JSON.stringify(rep.拖拽后.dom.filter((n) => NAMES.includes(n))) === JSON.stringify(expected),
-    { expected, 拖拽后: rep.拖拽后 }
+    JSON.stringify(设置顺序) === JSON.stringify(expected) &&
+      JSON.stringify(DOM顺序) === JSON.stringify(expected),
+    { expected, 设置顺序, DOM顺序, 拖拽后: rep.拖拽后 }
   );
   add(
     "分组顺序已写入 data.json",
@@ -213,7 +216,7 @@ export default async (ctx) => {
   add(
     "测试分组文件夹已清理，原分组数组已恢复",
     沙箱残留.length === 0 &&
-      JSON.stringify(rep.清理.groups.map((g) => g.name)) ===
+      JSON.stringify(rep.清理.groups) ===
         JSON.stringify(original.map((g) => g.name)),
     { 沙箱残留, 清理: rep.清理, original }
   );

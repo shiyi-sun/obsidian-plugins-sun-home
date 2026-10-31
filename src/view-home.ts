@@ -270,11 +270,18 @@ export class KbHomeView extends ItemView {
   /** 给分组区域挂上拖放处理：把卡片拖到本分组即移入 */
   private attachGroupDrop(sec: HTMLElement, group: KnowledgeGroup): void {
     const isUngrouped = group.id === "__ungrouped__";
+    // 「未分组」和真实分组的外壳 id 不同，比较归属时要归一成 null
+    const targetGroupId = isUngrouped ? null : group.id;
 
     sec.addEventListener("dragover", (e) => {
       if (!this.dragPath) return;
       // 已在卡片上处理过的不重复处理
       if ((e.target as HTMLElement)?.closest?.(".kb-card")) return;
+      // 拖回自己所在分组的空白处没有意义，也不该整块变色
+      if (findGroupOf(this.plugin.settings, this.dragPath) === targetGroupId) {
+        sec.removeClass("kb-group-drop-target");
+        return;
+      }
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
       sec.addClass("kb-group-drop-target");
@@ -394,6 +401,7 @@ export class KbHomeView extends ItemView {
     card.addEventListener("dragend", () => {
       this.dragPath = null;
       card.removeClass("kb-card-dragging");
+      this.clearCardDropMarks();
       this.clearGroupDropMarks();
     });
 
@@ -401,20 +409,21 @@ export class KbHomeView extends ItemView {
       e.preventDefault();
       // 阻止冒泡，避免分组容器同时高亮
       e.stopPropagation();
-      if (this.dragPath && this.dragPath !== kb.path) {
-        card.addClass("kb-card-drop-target");
-      }
+      if (!this.dragPath || this.dragPath === kb.path) return;
+      this.markCardDrop(card, this.isDropBeforeCard(e, card));
     });
 
-    card.addEventListener("dragleave", () => {
-      card.removeClass("kb-card-drop-target");
+    card.addEventListener("dragleave", (e) => {
+      if (card.contains(e.relatedTarget as Node)) return;
+      this.clearCardDropMark(card);
     });
 
     card.addEventListener("drop", (e) => {
       e.preventDefault();
       // 阻止冒泡到分组容器 —— 卡片间拖放只做「同级重排」，不改变分组归属
       e.stopPropagation();
-      card.removeClass("kb-card-drop-target");
+      const before = this.isDropBeforeCard(e, card);
+      this.clearCardDropMarks();
       const from = this.dragPath;
       if (!from || from === kb.path) return;
       // 跨分组拖到卡片上 = 移入该卡片所属分组
@@ -422,10 +431,40 @@ export class KbHomeView extends ItemView {
       if ((kb.groupId ?? null) !== fromGroup) {
         void this.moveToGroup(from, kb.groupId ?? null);
       } else {
-        this.reorder(from, kb.path, group);
+        void this.reorder(from, kb.path, group, before);
       }
       this.dragPath = null;
     });
+  }
+
+  /** 落点在卡片左半 → 插到它前面；右半 → 插到它后面 */
+  private isDropBeforeCard(e: DragEvent, card: HTMLElement): boolean {
+    const rect = card.getBoundingClientRect();
+    return (e.clientX ?? 0) < rect.left + rect.width / 2;
+  }
+
+  /** 同一时刻只给一张卡片画落点：目标卡描边 + 插入线 */
+  private markCardDrop(card: HTMLElement, before: boolean): void {
+    for (const el of Array.from(
+      this.containerEl.querySelectorAll<HTMLElement>(".kb-card-drop-target")
+    )) {
+      if (el !== card) this.clearCardDropMark(el);
+    }
+    card.addClass("kb-card-drop-target");
+    card.toggleClass("kb-card-drop-before", before);
+    card.toggleClass("kb-card-drop-after", !before);
+  }
+
+  private clearCardDropMark(card: HTMLElement): void {
+    card.removeClass("kb-card-drop-target");
+    card.removeClass("kb-card-drop-before");
+    card.removeClass("kb-card-drop-after");
+  }
+
+  private clearCardDropMarks(): void {
+    this.containerEl
+      .querySelectorAll<HTMLElement>(".kb-card-drop-target")
+      .forEach((el) => this.clearCardDropMark(el));
   }
 
   /** 清掉所有分组的高亮态 */
@@ -435,8 +474,13 @@ export class KbHomeView extends ItemView {
       .forEach((el) => el.removeClass("kb-group-drop-target"));
   }
 
-  /** 把 from 移动到 to 前面 */
-  private async reorder(from: string, to: string, group: KnowledgeGroup): Promise<void> {
+  /** 把 from 移动到 to 前面或后面 */
+  private async reorder(
+    from: string,
+    to: string,
+    group: KnowledgeGroup,
+    before: boolean
+  ): Promise<void> {
     const s = this.plugin.settings;
     const isUngrouped = group.id === "__ungrouped__";
 
@@ -457,11 +501,13 @@ export class KbHomeView extends ItemView {
     for (const p of siblingPaths) if (!order.includes(p)) order.push(p);
 
     const fi = order.indexOf(from);
-    const ti = order.indexOf(to);
-    if (fi === -1 || ti === -1) return;
-
+    if (fi === -1) return;
     order.splice(fi, 1);
-    order.splice(ti, 0, from);
+
+    // 先移除再找落点：当 from 原本在 to 前面时，to 的下标会前移一位
+    const ti = order.indexOf(to);
+    if (ti === -1) return;
+    order.splice(before ? ti : ti + 1, 0, from);
 
     if (isUngrouped) {
       s.ungroupedOrder = order;

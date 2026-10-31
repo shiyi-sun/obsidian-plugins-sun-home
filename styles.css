@@ -205,21 +205,37 @@
   opacity: 0.4;
 }
 
-.kb-card-drop-target {
+.kb-card.kb-card-drop-target {
   border-color: var(--interactive-accent);
-  border-style: dashed;
-}
-
-.kb-cards-divider .kb-card.kb-card-drop-target {
-  border: 1px dashed var(--interactive-accent);
-  border-radius: 4px;
-}
-
-/* 拖拽卡片到分组区域：高亮整个分组，提示「松手即移入」 */
-.kb-group-drop-target {
-  background: var(--background-modifier-hover);
-  border-radius: 8px;
   box-shadow: inset 0 0 0 1px var(--interactive-accent);
+}
+
+/* 插入线：落点在卡片左半画左边、右半画右边 */
+.kb-card.kb-card-drop-before::before,
+.kb-card.kb-card-drop-after::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--interactive-accent);
+  z-index: 2;
+}
+
+.kb-card.kb-card-drop-before::before {
+  left: -7px;
+}
+
+.kb-card.kb-card-drop-after::after {
+  right: -7px;
+}
+
+/* 拖拽卡片到分组区域：只给淡淡的主题色底 + 细描边，提示「松手即移入」 */
+.kb-group-drop-target {
+  background: hsla(var(--interactive-accent-hsl), 0.06);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px hsla(var(--interactive-accent-hsl), 0.5);
 }
 
 .kb-group-drop-target > .kb-group-header .kb-group-name::after {
@@ -243,7 +259,7 @@
 .kb-group-drop-hint.kb-group-drop-target {
   border-color: var(--interactive-accent);
   color: var(--interactive-accent);
-  background: var(--background-modifier-hover);
+  background: hsla(var(--interactive-accent-hsl), 0.07);
 }
 
 .kb-card-icon {
@@ -391,9 +407,9 @@
   border-radius: var(--radius-s);
 }
 
-/* 库根也是拖拽放置目标：给出与「移入文件夹」同样的底色 */
+/* 库根也是拖拽放置目标：给出与「移入文件夹」同样的提示 */
 .kb-tree-title[data-kb-drop-folder] {
-  background: hsla(var(--interactive-accent-hsl), 0.1);
+  background: hsla(var(--interactive-accent-hsl), 0.16);
   box-shadow: inset 0 0 0 1px var(--interactive-accent);
   color: var(--nav-item-color-highlighted, var(--interactive-accent));
 }
@@ -569,14 +585,11 @@ body.kb-dragging .nav-files-container .nav-folder.is-being-dragged-over > .nav-f
   color: var(--nav-item-color);
 }
 
-body.kb-dragging .nav-files-container > div[data-kb-drop-folder],
-body.kb-dragging .nav-files-container .nav-folder[data-kb-drop-folder] {
-  background-color: hsla(var(--interactive-accent-hsl), 0.05);
+/* 拖到文件夹正中＝移入：只高亮标题行，别把整棵子树刷底色 */
+body.kb-dragging .nav-files-container [data-kb-drop-folder] > .nav-folder-title {
+  background-color: hsla(var(--interactive-accent-hsl), 0.16);
+  box-shadow: inset 0 0 0 1px var(--interactive-accent);
   border-radius: var(--radius-s);
-}
-
-body.kb-dragging .nav-files-container > div[data-kb-drop-folder] > .nav-folder-title,
-body.kb-dragging .nav-files-container .nav-folder[data-kb-drop-folder] > .nav-folder-title {
   color: var(--nav-item-color-highlighted);
 }
 
