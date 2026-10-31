@@ -49,6 +49,8 @@ export class KbTreeView extends ItemView {
   private autoReveal = true;
   /** 「自动定位」按钮的 DOM 引用，用于同步激活态 */
   private autoRevealBtn: HTMLElement | null = null;
+  /** 手动排序后的滚动恢复值：重绘会把树重建，先记住用户拖拽时所处的位置 */
+  private pendingTreeScrollTop: number | null = null;
 
   // ---------- 拖拽状态 ----------
   /** 正在被拖拽的条目路径 */
@@ -408,6 +410,16 @@ export class KbTreeView extends ItemView {
     const tree = host.createDiv({ cls: "kb-tree-body nav-files-container" });
     this.attachTreeDrag(host);
     this.renderChildren(tree, folder);
+
+    // 手动拖拽排序后的重绘：把滚动位置放回用户操作的位置，不跳回当前笔记
+    if (this.pendingTreeScrollTop !== null) {
+      const top = this.pendingTreeScrollTop;
+      this.pendingTreeScrollTop = null;
+      tree.scrollTop = top;
+      window.requestAnimationFrame(() => {
+        if (tree.isConnected) tree.scrollTop = top;
+      });
+    }
 
     // 空白区域右键：针对知识库根目录
     tree.addEventListener("contextmenu", (e) => {
@@ -781,6 +793,9 @@ export class KbTreeView extends ItemView {
         side === "inside" ? undefined : side
       );
     }
+
+    const tree = this.containerEl.querySelector<HTMLElement>(".kb-tree-body");
+    if (tree) this.pendingTreeScrollTop = tree.scrollTop;
     this.render();
   }
 

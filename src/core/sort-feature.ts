@@ -101,6 +101,8 @@ export class SortFeature {
     this.syncRuntimeSettings();
 
     this.patcher.patchVaultCopy();
+    // 拖拽监听挂在 document 上：不依赖文件浏览器何时挂载/重建
+    this.dndEngine.attach();
     this.observeExplorer();
   }
 
@@ -139,7 +141,6 @@ export class SortFeature {
 
           this.patcher.patchExplorerSorting();
           this.sortExplorer();
-          this.dndEngine.attach(el);
           this.syncIndicators();
           // 原生树懒渲染：持续观察内容变化，条目渲染出来时补上隐藏态
           this.explorerManager.observeIndicatorSync(el);

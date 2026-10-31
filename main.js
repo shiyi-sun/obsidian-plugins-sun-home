@@ -1702,6 +1702,8 @@ var KbTreeView = class extends import_obsidian7.ItemView {
     this.autoReveal = true;
     /** 「自动定位」按钮的 DOM 引用，用于同步激活态 */
     this.autoRevealBtn = null;
+    /** 手动排序后的滚动恢复值：重绘会把树重建，先记住用户拖拽时所处的位置 */
+    this.pendingTreeScrollTop = null;
     // ---------- 拖拽状态 ----------
     /** 正在被拖拽的条目路径 */
     this.dragPath = null;
@@ -2012,6 +2014,15 @@ var KbTreeView = class extends import_obsidian7.ItemView {
     const tree = host.createDiv({ cls: "kb-tree-body nav-files-container" });
     this.attachTreeDrag(host);
     this.renderChildren(tree, folder);
+    if (this.pendingTreeScrollTop !== null) {
+      const top = this.pendingTreeScrollTop;
+      this.pendingTreeScrollTop = null;
+      tree.scrollTop = top;
+      window.requestAnimationFrame(() => {
+        if (tree.isConnected)
+          tree.scrollTop = top;
+      });
+    }
     tree.addEventListener("contextmenu", (e) => {
       if (e.target === tree) {
         e.preventDefault();
@@ -2345,6 +2356,9 @@ var KbTreeView = class extends import_obsidian7.ItemView {
         side === "inside" ? void 0 : side
       );
     }
+    const tree = this.containerEl.querySelector(".kb-tree-body");
+    if (tree)
+      this.pendingTreeScrollTop = tree.scrollTop;
     this.render();
   }
   /** 目标处已有同名项时像原生一样自动避让改名（xx → xx 1），而不是拒绝这次移动 */
@@ -3020,17 +3034,20 @@ var DndEngine = class {
   constructor(host) {
     this.host = host;
     this.log = initLog("DND ENGINE", "#a6ff00");
-    this.sparseLog = this.initSparseLog(500);
+    this.attached = false;
     this.explorerEl = null;
     this.explorerRect = null;
     this.draggedItem = null;
-    /** 本次拖拽涉及的路径（被拖条目 + 多选中的其余条目），不参与落点候选 */
+    this.draggedRow = null;
+    this.draggedPinned = false;
+    /** 本次拖拽涉及的路径（被拖条目 + 多选中的其余条目），不参与落点 */
     this.draggingPaths = /* @__PURE__ */ new Set();
     this.dropSibling = null;
     this.dropFolder = null;
     this.insertSide = "before";
     this.pointer = { x: 0, y: 0 };
-    this.levelOffset = 5;
+    /** 手动排序后要恢复的原生树滚动位置；用于顶掉 Obsidian 自动定位当前文件的滚动 */
+    this.pendingScrollTop = null;
     this.autoscrollZoneHeight = 60;
     this.edgeScrollSpeed = 20;
     this.autoscrollRaf = 0;
@@ -3039,86 +3056,99 @@ var DndEngine = class {
     this.expandTimeout = 0;
     this.onDragStart = (event) => {
       var _a, _b;
-      const closestTreeItem = event.target.closest(".tree-item");
-      if (!closestTreeItem)
+      const target = event.target;
+      const container = (_a = target == null ? void 0 : target.closest) == null ? void 0 : _a.call(target, ".nav-files-container");
+      if (!container || !container.closest('[data-type="file-explorer"]'))
         return;
-      const view = this.host.getExplorerView();
-      this.draggedItem = (_b = (_a = view == null ? void 0 : view.files) == null ? void 0 : _a.get(closestTreeItem)) != null ? _b : null;
-      if (!this.draggedItem)
+      const row = (_b = target == null ? void 0 : target.closest) == null ? void 0 : _b.call(target, ".tree-item");
+      if (!row)
         return;
+      const self = this.selfOf(row);
+      const path = self == null ? void 0 : self.dataset.path;
+      if (!path)
+        return;
+      const file = this.host.app.vault.getAbstractFileByPath(path);
+      if (!file)
+        return;
+      this.explorerEl = container;
+      this.explorerRect = container.getBoundingClientRect();
+      this.draggedItem = file;
+      this.draggedRow = row;
+      this.draggedPinned = this.host.getItemSettings(file.path).isPinned;
       this.draggingPaths = new Set(this.getSelectedItems().map((item) => item.file.path));
-      this.draggingPaths.add(this.draggedItem.path);
-      this.explorerRect = this.explorerEl.getBoundingClientRect();
+      this.draggingPaths.add(file.path);
       document.body.classList.add("kb-dragging");
-      this.log(`Started dragging '${this.draggedItem.path}'`);
+      this.log(`Started dragging '${file.path}'`);
     };
     this.onDragOver = (event) => {
+      var _a;
       if (!this.draggedItem)
         return;
-      const view = this.host.getExplorerView();
+      const target = event.target;
+      const container = (_a = target == null ? void 0 : target.closest) == null ? void 0 : _a.call(target, ".nav-files-container");
+      if (container && container.closest('[data-type="file-explorer"]')) {
+        if (container !== this.explorerEl) {
+          this.explorerEl = container;
+          this.explorerRect = container.getBoundingClientRect();
+        }
+      }
+      const view = this.getExplorerViewFor(this.explorerEl);
       if (view)
         view.lastDropTargetEl = null;
       this.pointer = { x: event.clientX, y: event.clientY };
       this.startAutoscroll();
-      if (this.isPointerInsideExplorer()) {
-        this.updateDragState();
-      } else {
-        if (this.dropSibling || this.dropFolder)
-          this.log("Cursor left explorer, clearing indicators");
-        this.updateDragState.cancel();
+      if (!this.isPointerInsideExplorer()) {
         this.clearDropIndicators();
         this.dropSibling = null;
         this.dropFolder = null;
+        this.clearPendingExpand();
+        return;
+      }
+      if (this.resolveAndApplyDropTarget()) {
+        event.preventDefault();
+        if (event.dataTransfer)
+          event.dataTransfer.dropEffect = "move";
       }
     };
     this.onScroll = () => {
       if (!this.draggedItem || !this.isPointerInsideExplorer())
         return;
-      this.sparseLog("Scrolled during dragging, updating drag state");
-      this.updateDragState();
+      this.resolveAndApplyDropTarget();
     };
     this.onDrop = (event) => {
       var _a;
       if (!this.draggedItem)
         return;
-      this.log(`Dropped '${this.draggedItem.path}'`);
-      if ((_a = this.explorerEl) == null ? void 0 : _a.contains(event.target)) {
-        event.preventDefault();
-        this.commitDrop();
-      } else {
-        this.log("Dropped outside explorer, skipping move");
+      const target = event.target;
+      const container = (_a = target == null ? void 0 : target.closest) == null ? void 0 : _a.call(target, ".nav-files-container");
+      if (container && container.closest('[data-type="file-explorer"]') && container !== this.explorerEl) {
+        this.explorerEl = container;
+        this.explorerRect = container.getBoundingClientRect();
       }
-      this.onDragEnd();
+      this.pointer = { x: event.clientX, y: event.clientY };
+      if (!this.isPointerInsideExplorer()) {
+        this.log("Dropped outside native explorer, skipping move");
+        this.resetDrag();
+        return;
+      }
+      event.preventDefault();
+      if (!this.dropSibling && !this.dropFolder)
+        this.resolveAndApplyDropTarget();
+      this.commitDrop();
+      this.resetDrag();
     };
     this.onDragEnd = () => {
       if (!this.draggedItem)
         return;
       this.log(`Ended dragging '${this.draggedItem.path}'`);
-      this.updateDragState.cancel();
-      this.stopAutoscroll();
-      this.clearPendingExpand();
-      this.clearDropIndicators();
-      this.draggedItem = null;
-      this.draggingPaths.clear();
-      this.dropSibling = null;
-      this.dropFolder = null;
-      this.explorerRect = null;
-      document.body.classList.remove("kb-dragging");
+      this.resetDrag();
     };
-    this.updateDragState = this.rafThrottle(() => {
-      var _a, _b;
-      if (!this.draggedItem)
-        return;
-      this.clearDropIndicators();
-      this.resolveDropTarget();
-      this.applyDropIndicators();
-      this.sparseLog(
-        `Dragging '${this.draggedItem.path}' ${this.insertSide} '${(_a = this.resolveItemPath(this.dropSibling)) != null ? _a : ""}' in '${(_b = this.resolveItemPath(this.dropFolder)) != null ? _b : ""}'`
-      );
-      this.sparseLog.flush();
-    });
     this.handleAutoscroll = () => {
       if (!this.explorerEl || !this.explorerRect || !this.draggedItem) {
+        this.autoscrollRaf = 0;
+        return;
+      }
+      if (this.pointer.x < this.explorerRect.left || this.pointer.x > this.explorerRect.right) {
         this.autoscrollRaf = 0;
         return;
       }
@@ -3133,52 +3163,295 @@ var DndEngine = class {
         this.autoscrollRaf = 0;
         return;
       }
+      const before = this.explorerEl.scrollTop;
       this.explorerEl.scrollTop += speed;
+      if (this.explorerEl.scrollTop === before) {
+        this.autoscrollRaf = 0;
+        return;
+      }
+      this.resolveAndApplyDropTarget();
       this.autoscrollRaf = window.requestAnimationFrame(this.handleAutoscroll);
     };
   }
-  attach(explorerEl) {
-    if (explorerEl === this.explorerEl)
-      return this.log("Already attached");
-    this.unlistenExplorer();
-    this.explorerEl = explorerEl;
-    explorerEl.addEventListener("dragstart", this.onDragStart);
-    document.addEventListener("dragover", this.onDragOver);
-    explorerEl.addEventListener("scroll", this.onScroll);
-    document.addEventListener("drop", this.onDrop, { capture: true });
-    explorerEl.addEventListener("dragend", this.onDragEnd);
-    this.log("Attached to explorer");
+  /** 挂在 document 上：文件浏览器重建、多个 Files 面板都不影响监听 */
+  attach() {
+    if (this.attached)
+      return;
+    this.attached = true;
+    document.addEventListener("dragstart", this.onDragStart, true);
+    document.addEventListener("dragover", this.onDragOver, true);
+    document.addEventListener("drop", this.onDrop, true);
+    document.addEventListener("dragend", this.onDragEnd, true);
+    this.log("Attached to document");
   }
   detach() {
-    document.removeEventListener("dragover", this.onDragOver);
-    document.removeEventListener("drop", this.onDrop, { capture: true });
-    this.unlistenExplorer();
+    document.removeEventListener("dragstart", this.onDragStart, true);
+    document.removeEventListener("dragover", this.onDragOver, true);
+    document.removeEventListener("drop", this.onDrop, true);
+    document.removeEventListener("dragend", this.onDragEnd, true);
+    this.attached = false;
+    this.resetDrag();
     this.log("Detached");
   }
-  unlistenExplorer() {
-    if (!this.explorerEl)
-      return;
-    this.explorerEl.removeEventListener("dragstart", this.onDragStart);
-    this.explorerEl.removeEventListener("scroll", this.onScroll);
-    this.explorerEl.removeEventListener("dragend", this.onDragEnd);
-    this.explorerEl = null;
-    this.explorerRect = null;
+  resolveAndApplyDropTarget() {
+    this.clearDropIndicators();
+    this.resolveDropTarget();
+    this.applyDropIndicators();
+    return !!(this.dropSibling || this.dropFolder);
   }
-  isPointerInsideExplorer() {
-    const rect = this.explorerRect;
-    if (!rect)
-      return false;
-    return this.pointer.x >= rect.left && this.pointer.x <= rect.right && this.pointer.y >= rect.top && this.pointer.y <= rect.bottom;
+  resolveDropTarget() {
+    var _a, _b;
+    if (!this.explorerEl || !this.draggedItem || !this.draggedRow)
+      return;
+    const hit = activeDocument.elementFromPoint(this.pointer.x, this.pointer.y);
+    if (!hit || !this.explorerEl.contains(hit))
+      return;
+    const title = hit.closest(".nav-folder-title, .nav-file-title");
+    if (title && this.explorerEl.contains(title)) {
+      this.resolveTitleTarget(title);
+      return;
+    }
+    const folderRow = hit.closest(".tree-item.nav-folder");
+    if (folderRow && this.explorerEl.contains(folderRow)) {
+      const folderTitle = this.selfOf(folderRow);
+      if (folderTitle) {
+        const rect = folderTitle.getBoundingClientRect();
+        if (this.pointer.y >= rect.top && this.pointer.y <= rect.bottom) {
+          this.resolveTitleTarget(folderTitle);
+          return;
+        }
+      }
+      const children2 = folderRow.querySelector(
+        ":scope > .nav-folder-children"
+      );
+      this.resolveBlankTarget(children2, folderRow);
+      return;
+    }
+    const children = hit.closest(".nav-folder-children");
+    if (children && this.explorerEl.contains(children)) {
+      const folder = (_b = (_a = children.parentElement) == null ? void 0 : _a.closest(".nav-folder")) != null ? _b : null;
+      this.resolveBlankTarget(children, folder);
+      return;
+    }
+    const rootContainer = this.explorerEl.firstElementChild;
+    this.resolveBlankTarget(rootContainer, null);
+  }
+  /** 空白/行距区域：按方向感知找最近的标题行；没有行才退化成移入容器 */
+  resolveBlankTarget(container, folderRow) {
+    var _a, _b, _c, _d, _e;
+    this.clearPendingExpand();
+    let folderPath = "/";
+    if (folderRow) {
+      folderPath = (_a = this.resolveItemPath(folderRow)) != null ? _a : "";
+      if (!folderPath || this.isSelfOrDescendant(folderRow))
+        return;
+      if (this.draggingPaths.has(folderPath))
+        return;
+      if (this.draggedPinned && ((_c = (_b = this.draggedItem) == null ? void 0 : _b.parent) == null ? void 0 : _c.path) !== folderPath)
+        return;
+    } else if (this.draggedPinned && ((_e = (_d = this.draggedItem) == null ? void 0 : _d.parent) == null ? void 0 : _e.path) !== "/") {
+      return;
+    }
+    const near = container ? this.nearestSiblingRow(container, folderPath) : null;
+    if (near) {
+      this.setSiblingTarget(near.row, near.side);
+      if (this.dropSibling)
+        return;
+    }
+    if (this.draggedPinned)
+      return;
+    if (folderRow)
+      this.dropFolder = folderRow;
+    else if (!this.draggedPinned)
+      this.dropFolder = container;
+  }
+  /** 在容器的直接子行里找离指针最近的一行，并给出「前/后」方向 */
+  nearestSiblingRow(container, folderPath) {
+    var _a, _b;
+    const rows = Array.from(container.children).filter(
+      (el) => el instanceof HTMLElement && el.classList.contains("tree-item")
+    );
+    let best = null;
+    for (const row of rows) {
+      if (this.isSelfOrDescendant(row))
+        continue;
+      const path = this.resolveItemPath(row);
+      if (!path || this.draggingPaths.has(path))
+        continue;
+      const pinned = this.host.getItemSettings(path).isPinned;
+      if (pinned !== this.draggedPinned)
+        continue;
+      if (this.draggedPinned && ((_b = (_a = this.draggedItem) == null ? void 0 : _a.parent) == null ? void 0 : _b.path) !== folderPath)
+        continue;
+      const self = this.selfOf(row);
+      if (!self)
+        continue;
+      const rect = self.getBoundingClientRect();
+      let side;
+      let dist;
+      if (this.pointer.y < rect.top) {
+        dist = rect.top - this.pointer.y;
+        side = "before";
+      } else if (this.pointer.y > rect.bottom) {
+        dist = this.pointer.y - rect.bottom;
+        side = "after";
+      } else {
+        dist = 0;
+        side = this.pointer.y < rect.top + rect.height / 2 ? "before" : "after";
+      }
+      if (!best || dist < best.dist - 0.01 || Math.abs(dist - best.dist) <= 0.01 && side === "before" && best.side === "after") {
+        best = { row, side, dist };
+      }
+    }
+    return best ? { row: best.row, side: best.side } : null;
+  }
+  /** 目标文件夹当前显示顺序里的最后一个非拖拽子项，用于「移入文件夹」落到末尾 */
+  lastChildPath(folderPath) {
+    var _a, _b;
+    if (!this.draggedItem)
+      return null;
+    const folder = folderPath === "/" ? this.host.app.vault.getRoot() : this.host.app.vault.getAbstractFileByPath(folderPath);
+    if (!(folder instanceof import_obsidian11.TFolder))
+      return null;
+    const view = this.getExplorerViewFor(this.explorerEl);
+    let sorted;
+    try {
+      sorted = (_b = (_a = view == null ? void 0 : view.getSortedFolderItems) == null ? void 0 : _a.call(view, folder)) != null ? _b : folder.children.map((file) => ({ file }));
+    } catch (e) {
+      sorted = folder.children.map((file) => ({ file }));
+    }
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const file = sorted[i].file;
+      if (file.path === this.draggedItem.path || this.draggingPaths.has(file.path))
+        continue;
+      return file.path;
+    }
+    return null;
+  }
+  resolveTitleTarget(title) {
+    const row = title.closest(".tree-item");
+    if (!row)
+      return;
+    const rect = title.getBoundingClientRect();
+    const isFolder = title.classList.contains("nav-folder-title");
+    if (isFolder) {
+      const ratio = rect.height > 0 ? (this.pointer.y - rect.top) / rect.height : 0.5;
+      if (ratio > FOLDER_INSIDE_TOP && ratio < FOLDER_INSIDE_BOTTOM) {
+        if (this.draggedPinned || this.isSelfOrDescendant(row)) {
+          this.clearPendingExpand();
+          return;
+        }
+        const folderPath = this.resolveItemPath(row);
+        if (!folderPath || this.draggingPaths.has(folderPath)) {
+          this.clearPendingExpand();
+          return;
+        }
+        this.dropFolder = row;
+        if (row.classList.contains("is-collapsed"))
+          this.scheduleFolderExpand(row);
+        else
+          this.clearPendingExpand();
+        return;
+      }
+      this.clearPendingExpand();
+      this.setSiblingTarget(row, ratio < 0.5 ? "before" : "after");
+      return;
+    }
+    this.clearPendingExpand();
+    this.setSiblingTarget(row, this.pointer.y < rect.top + rect.height / 2 ? "before" : "after");
+  }
+  setSiblingTarget(row, side) {
+    var _a, _b;
+    if (this.isSelfOrDescendant(row))
+      return;
+    const rowPath = this.resolveItemPath(row);
+    if (!rowPath || this.draggingPaths.has(rowPath))
+      return;
+    const folderEl = this.parentFolderOf(row);
+    const folderPath = this.resolveItemPath(folderEl);
+    if (!folderPath)
+      return;
+    const rowPinned = this.host.getItemSettings(rowPath).isPinned;
+    if (rowPinned !== this.draggedPinned)
+      return;
+    if (this.draggedPinned && ((_b = (_a = this.draggedItem) == null ? void 0 : _a.parent) == null ? void 0 : _b.path) !== folderPath)
+      return;
+    this.dropSibling = row;
+    this.insertSide = side;
+    this.dropFolder = folderEl;
+  }
+  /** 把目标文件夹当前显示顺序固化成 customOrder，再切到自定义顺序 */
+  ensureCustomSortMode(folderPath) {
+    var _a, _b;
+    const items = this.host.getSettings().items;
+    let folderSettings = items[folderPath];
+    if ((folderSettings == null ? void 0 : folderSettings.sortOrder) === "custom")
+      return;
+    const folder = folderPath === "/" ? this.host.app.vault.getRoot() : this.host.app.vault.getAbstractFileByPath(folderPath);
+    if (!(folder instanceof import_obsidian11.TFolder))
+      return;
+    const view = this.getExplorerViewFor(this.explorerEl);
+    let sorted;
+    try {
+      sorted = (_b = (_a = view == null ? void 0 : view.getSortedFolderItems) == null ? void 0 : _a.call(view, folder)) != null ? _b : folder.children.map((file) => ({ file }));
+    } catch (e) {
+      sorted = folder.children.map((file) => ({ file }));
+    }
+    if (!folderSettings) {
+      folderSettings = {
+        isPinned: false,
+        isHidden: false,
+        sortOrder: "custom",
+        customOrder: []
+      };
+      items[folderPath] = folderSettings;
+    }
+    folderSettings.customOrder = sorted.map((entry) => entry.file.name);
+    folderSettings.sortOrder = "custom";
+  }
+  parentFolderOf(row) {
+    var _a, _b, _c, _d;
+    const container = row.parentElement;
+    if (container == null ? void 0 : container.classList.contains("nav-folder-children")) {
+      return (_b = (_a = container.parentElement) == null ? void 0 : _a.closest(".nav-folder")) != null ? _b : null;
+    }
+    return (_d = (_c = this.explorerEl) == null ? void 0 : _c.firstElementChild) != null ? _d : null;
+  }
+  /** 被拖行本身或它的后代（拖文件夹时不能落进自己里面） */
+  isSelfOrDescendant(row) {
+    return !!this.draggedRow && (row === this.draggedRow || this.draggedRow.contains(row));
+  }
+  applyDropIndicators() {
+    if (this.dropSibling)
+      this.dropSibling.dataset.kbDropSibling = this.insertSide;
+    if (this.dropFolder && !this.dropSibling)
+      this.dropFolder.dataset.kbDropFolder = "";
+  }
+  /** 只清上一次的两个落点，不做全文档查询——上万行时 querySelectorAll 会在每一帧拖垮界面 */
+  clearDropIndicators() {
+    if (this.dropSibling)
+      delete this.dropSibling.dataset.kbDropSibling;
+    if (this.dropFolder)
+      delete this.dropFolder.dataset.kbDropFolder;
+    this.dropSibling = null;
+    this.dropFolder = null;
   }
   commitDrop() {
     if (!this.draggedItem)
       return;
-    let dropSiblingPath = this.resolveItemPath(this.dropSibling);
     const dropFolderPath = this.resolveItemPath(this.dropFolder);
     if (!dropFolderPath)
       return this.log("Drop folder not found, skipping");
+    let dropSiblingPath = this.resolveItemPath(this.dropSibling);
+    const droppedOnSibling = !!dropSiblingPath;
+    if (droppedOnSibling)
+      this.ensureCustomSortMode(dropFolderPath);
+    else {
+      dropSiblingPath = this.lastChildPath(dropFolderPath);
+    }
     const selectedItems = this.getSelectedItems();
     const isDraggedSelected = selectedItems.some((item) => item.file === this.draggedItem);
+    this.pendingScrollTop = this.explorerEl ? { container: this.explorerEl, top: this.explorerEl.scrollTop } : null;
     if (isDraggedSelected && selectedItems.length > 0) {
       const pinnedStates = new Set(
         selectedItems.map((item) => this.host.getItemSettings(item.file.path).isPinned)
@@ -3193,146 +3466,116 @@ var DndEngine = class {
         if (parentPaths.size > 1)
           return this.log("Pinned selection spans folders, skipping");
       }
+      const firstSide = droppedOnSibling ? this.insertSide : "after";
       selectedItems.forEach((item, idx) => {
-        const insertSide = idx === 0 ? this.insertSide : "after";
+        const insertSide = idx === 0 ? firstSide : "after";
         const newPath = this.resolveNewPath(item.file, dropFolderPath);
         this.moveItem(item.file, newPath, dropFolderPath, dropSiblingPath, insertSide);
         dropSiblingPath = newPath;
       });
     } else {
       const newPath = this.resolveNewPath(this.draggedItem, dropFolderPath);
-      this.moveItem(this.draggedItem, newPath, dropFolderPath, dropSiblingPath, this.insertSide);
-    }
-  }
-  clearDropIndicators() {
-    if (this.dropSibling)
-      delete this.dropSibling.dataset.kbDropSibling;
-    if (this.dropFolder)
-      delete this.dropFolder.dataset.kbDropFolder;
-  }
-  resolveDropTarget() {
-    const isDraggedPinned = this.host.getItemSettings(this.draggedItem.path).isPinned;
-    this.resolveDropSibling(isDraggedPinned);
-    if (this.dropSibling) {
-      this.dropFolder = this.dropSibling.parentElement.closest(
-        '[data-type="file-explorer"] > .nav-files-container > div, .nav-folder'
+      this.moveItem(
+        this.draggedItem,
+        newPath,
+        dropFolderPath,
+        dropSiblingPath,
+        droppedOnSibling ? this.insertSide : "after"
       );
     }
-    this.resolveHoveredFolder(isDraggedPinned);
-    const dropFolderPath = this.resolveItemPath(this.dropFolder);
-    if (!dropFolderPath)
+    this.scheduleScrollRestore();
+  }
+  /**
+   * 排序后把滚动位置拉回用户拖动时所在的位置。
+   * Obsidian 开启「自动显示当前文件」时会在重排后把活动文件滚回视野，
+   * 用户刚排好的位置就被抢走；这里覆盖这次滚动，活动文件切换时的自动定位不受影响。
+   */
+  scheduleScrollRestore() {
+    const pending = this.pendingScrollTop;
+    if (!pending)
       return;
-    const dropFolderSettings = this.host.getSettings().items[dropFolderPath];
-    if (dropFolderSettings && dropFolderSettings.sortOrder !== "custom") {
-      this.dropSibling = null;
-    }
+    this.pendingScrollTop = null;
+    const restore = () => {
+      if (pending.container.isConnected)
+        pending.container.scrollTop = pending.top;
+    };
+    window.requestAnimationFrame(() => {
+      restore();
+      window.requestAnimationFrame(restore);
+    });
+    window.setTimeout(restore, 80);
   }
-  resolveDropSibling(isDraggedPinned) {
-    var _a, _b, _c;
-    const siblingCandidates = Array.from(
-      this.explorerEl.querySelectorAll(
-        ".tree-item:not(.nav-folder:has(> .tree-item-self:is(.is-being-dragged, .is-selected)) .tree-item)"
-      )
-    );
-    let shortestDist = Infinity;
-    const view = this.host.getExplorerView();
-    for (const candidate of siblingCandidates) {
-      const candidateItem = (_a = view == null ? void 0 : view.files) == null ? void 0 : _a.get(candidate);
-      if (!candidateItem)
-        continue;
-      if (this.draggingPaths.has(candidateItem.path))
-        continue;
-      const isCandidatePinned = this.host.getItemSettings(candidateItem.path).isPinned;
-      if (isDraggedPinned !== isCandidatePinned)
-        continue;
-      const areInSameFolder = ((_b = this.draggedItem.parent) == null ? void 0 : _b.path) === ((_c = candidateItem.parent) == null ? void 0 : _c.path);
-      if (isDraggedPinned && !areInSameFolder)
-        continue;
-      const candidateRect = candidate.getBoundingClientRect();
-      const distToBottom = Math.abs(this.pointer.y - this.virtualBottom(candidate, candidateRect));
-      const distToTop = Math.abs(this.pointer.y - candidateRect.top);
-      const dist = Math.min(distToBottom, distToTop);
-      if (dist < shortestDist) {
-        shortestDist = dist;
-        this.dropSibling = candidate;
-        this.insertSide = distToBottom < distToTop ? "after" : "before";
-      }
-    }
-  }
-  virtualBottom(el, rect) {
-    let bottom = rect.bottom;
-    let folder = el.matches(".nav-folder:not(.is-collapsed)") ? el : null;
-    while (folder) {
-      bottom += this.levelOffset;
-      folder = folder.querySelector(
-        ":scope > .nav-folder-children > .tree-item:nth-last-child(1 of .tree-item).nav-folder:not(.is-collapsed)"
-      );
-    }
-    return bottom;
-  }
-  resolveHoveredFolder(isDraggedPinned) {
-    var _a, _b;
-    const hoveredEl = activeDocument.elementFromPoint(this.pointer.x, this.pointer.y);
-    if (!hoveredEl)
-      return;
-    const closestFolderTitle = hoveredEl.closest(".nav-folder-title");
-    let shouldClearExpand = true;
-    if (closestFolderTitle && !isDraggedPinned) {
-      const folderEl = closestFolderTitle.parentElement;
-      const view = this.host.getExplorerView();
-      const draggedEl = (_b = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[this.draggedItem.path]) == null ? void 0 : _b.el;
-      const isDraggedFolder = draggedEl ? draggedEl.contains(folderEl) : false;
-      const titleRect = closestFolderTitle.getBoundingClientRect();
-      const ratio = titleRect.height > 0 ? (this.pointer.y - titleRect.top) / titleRect.height : 0.5;
-      const isTitleCenterHovered = ratio > FOLDER_INSIDE_TOP && ratio < FOLDER_INSIDE_BOTTOM;
-      if (isDraggedFolder) {
-        this.sparseLog("Hovering over dragged folder or descendant, ignoring");
-      } else if (isTitleCenterHovered) {
-        this.dropFolder = folderEl;
-        this.dropSibling = null;
-        if (this.dropFolder.classList.contains("is-collapsed")) {
-          if (folderEl !== this.expandTarget)
-            this.scheduleFolderExpand(folderEl);
-          shouldClearExpand = false;
-        }
-      }
-    }
-    if (shouldClearExpand)
-      this.clearPendingExpand();
-  }
-  applyDropIndicators() {
-    if (this.dropSibling)
-      this.dropSibling.dataset.kbDropSibling = this.insertSide;
-    if (this.dropFolder && !this.dropSibling)
-      this.dropFolder.dataset.kbDropFolder = "";
-  }
-  scheduleFolderExpand(folderEl) {
+  resetDrag() {
+    this.clearDropIndicators();
     this.clearPendingExpand();
-    this.expandTarget = folderEl;
-    this.expandTimeout = window.setTimeout(() => {
-      var _a, _b;
-      const folderPath = this.resolveItemPath(folderEl);
-      if (!folderPath)
-        return;
-      const view = this.host.getExplorerView();
-      const folderItem = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[folderPath];
-      void ((_b = folderItem == null ? void 0 : folderItem.setCollapsed) == null ? void 0 : _b.call(folderItem, false, true));
-      this.log(`Folder '${folderPath}' expanded after timeout`);
-    }, this.expandDelay);
+    this.stopAutoscroll();
+    this.draggedItem = null;
+    this.draggedRow = null;
+    this.draggedPinned = false;
+    this.draggingPaths.clear();
+    this.explorerEl = null;
+    this.explorerRect = null;
+    document.body.classList.remove("kb-dragging");
   }
-  clearPendingExpand() {
-    window.clearTimeout(this.expandTimeout);
-    this.expandTarget = null;
+  isPointerInsideExplorer() {
+    const rect = this.explorerRect;
+    if (!rect)
+      return false;
+    return this.pointer.x >= rect.left && this.pointer.x <= rect.right && this.pointer.y >= rect.top && this.pointer.y <= rect.bottom;
+  }
+  selfOf(el) {
+    var _a, _b;
+    if (!el)
+      return null;
+    if (el.matches(".tree-item-self"))
+      return el;
+    const direct = el.querySelector(":scope > .tree-item-self");
+    if (direct)
+      return direct;
+    return (_b = (_a = el.closest(".tree-item")) == null ? void 0 : _a.querySelector(
+      ":scope > .tree-item-self"
+    )) != null ? _b : null;
+  }
+  resolveItemPath(el) {
+    var _a, _b, _c, _d, _e;
+    if (!el)
+      return null;
+    if (el === ((_a = this.explorerEl) == null ? void 0 : _a.firstElementChild))
+      return "/";
+    const self = this.selfOf(el);
+    const path = self == null ? void 0 : self.dataset.path;
+    if (path)
+      return path;
+    const row = el.matches(".tree-item") ? el : el.closest(".tree-item");
+    return (_e = (_d = (_c = (_b = this.getExplorerViewFor(this.explorerEl)) == null ? void 0 : _b.files) == null ? void 0 : _c.get(row)) == null ? void 0 : _d.path) != null ? _e : null;
+  }
+  getExplorerViewFor(el) {
+    var _a, _b, _c;
+    const leaves = this.host.app.workspace.getLeavesOfType("file-explorer");
+    if (el) {
+      for (const leaf of leaves) {
+        const view = leaf.view;
+        if ((_a = view == null ? void 0 : view.containerEl) == null ? void 0 : _a.contains(el))
+          return view;
+      }
+    }
+    return (_c = (_b = leaves[0]) == null ? void 0 : _b.view) != null ? _c : null;
   }
   getSelectedItems() {
     var _a;
-    const view = this.host.getExplorerView();
+    const view = this.getExplorerViewFor(this.explorerEl);
     const selectedDoms = (_a = view == null ? void 0 : view.tree) == null ? void 0 : _a.selectedDoms;
     if (!selectedDoms)
       return [];
     const selectedItems = [...selectedDoms];
-    const nonNestedItems = selectedItems.filter(
-      (selected) => !selectedItems.some(
+    const resolved = selectedItems.map((selected) => {
+      var _a2;
+      const path = selected.el ? this.resolveItemPath(selected.el) : (_a2 = selected.file) == null ? void 0 : _a2.path;
+      const file = path ? this.host.app.vault.getAbstractFileByPath(path) : selected.file;
+      return file ? { el: selected.el, file } : null;
+    }).filter((item) => !!item);
+    const nonNestedItems = resolved.filter(
+      (selected) => !resolved.some(
         (selectedFolder) => selectedFolder.file instanceof import_obsidian11.TFolder && selectedFolder.file.path !== selected.file.path && selected.file.path.startsWith(selectedFolder.file.path + "/")
       )
     );
@@ -3361,15 +3604,6 @@ var DndEngine = class {
     }
     return newPath;
   }
-  resolveItemPath(el) {
-    var _a, _b, _c, _d;
-    if (!el)
-      return null;
-    if (el === ((_a = this.explorerEl) == null ? void 0 : _a.firstElementChild))
-      return "/";
-    const view = this.host.getExplorerView();
-    return (_d = (_c = (_b = view == null ? void 0 : view.files) == null ? void 0 : _b.get(el)) == null ? void 0 : _c.path) != null ? _d : null;
-  }
   moveItem(draggedItem, newPath, folderPath, siblingPath, insertSide) {
     var _a, _b;
     const folderSettings = this.host.getSettings().items[folderPath];
@@ -3390,39 +3624,23 @@ var DndEngine = class {
   resolveScrollSpeed(distToEdge) {
     return (1 - distToEdge / this.autoscrollZoneHeight) ** 2 * this.edgeScrollSpeed;
   }
-  rafThrottle(fn) {
-    let raf = 0;
-    let latestArgs;
-    const throttled = (...args) => {
-      latestArgs = args;
-      if (raf)
+  scheduleFolderExpand(folderEl) {
+    this.clearPendingExpand();
+    this.expandTarget = folderEl;
+    this.expandTimeout = window.setTimeout(() => {
+      var _a, _b;
+      const folderPath = this.resolveItemPath(folderEl);
+      if (!folderPath)
         return;
-      raf = window.requestAnimationFrame(() => {
-        raf = 0;
-        fn(...latestArgs);
-      });
-    };
-    throttled.cancel = () => {
-      window.cancelAnimationFrame(raf);
-      raf = 0;
-    };
-    return throttled;
+      const view = this.getExplorerViewFor(this.explorerEl);
+      const folderItem = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[folderPath];
+      void ((_b = folderItem == null ? void 0 : folderItem.setCollapsed) == null ? void 0 : _b.call(folderItem, false, true));
+      this.log(`Folder '${folderPath}' expanded after timeout`);
+    }, this.expandDelay);
   }
-  initSparseLog(delay) {
-    let lastFlush = 0;
-    let buffer = [];
-    const sparse = (...args) => buffer.push(...buffer.length ? ["\n", ...args] : args);
-    sparse.flush = () => {
-      if (!buffer.length)
-        return;
-      const now = Date.now();
-      if (now - lastFlush >= delay) {
-        lastFlush = now;
-        this.log(...buffer);
-      }
-      buffer = [];
-    };
-    return sparse;
+  clearPendingExpand() {
+    window.clearTimeout(this.expandTimeout);
+    this.expandTarget = null;
   }
 };
 
@@ -3432,23 +3650,28 @@ function mountIndicator(item, itemSettings, isPatternHidden) {
   var _a, _b;
   if (!(item == null ? void 0 : item.coverEl))
     return;
+  const isPinned = (_a = itemSettings == null ? void 0 : itemSettings.isPinned) != null ? _a : false;
+  const isHidden = ((_b = itemSettings == null ? void 0 : itemSettings.isHidden) != null ? _b : false) || isPatternHidden;
   let indicatorEl = item.coverEl.querySelector(".kb-indicator");
-  if (!indicatorEl) {
+  if (!isPinned && !isHidden) {
+    indicatorEl == null ? void 0 : indicatorEl.remove();
+  } else if (!indicatorEl) {
     indicatorEl = item.coverEl.createDiv({ cls: "kb-indicator" });
   }
-  const isPinned = (_a = itemSettings == null ? void 0 : itemSettings.isPinned) != null ? _a : false;
-  const current = indicatorEl.dataset.state;
-  const next = isPinned ? "pinned" : "none";
-  if (current !== next) {
-    indicatorEl.dataset.state = next;
-    indicatorEl.empty();
-    if (isPinned) {
-      const pinEl = indicatorEl.createDiv({ cls: "kb-pin-indicator" });
-      (0, import_obsidian12.setIcon)(pinEl, "pin");
+  if (indicatorEl) {
+    const pinEl = indicatorEl.querySelector(".kb-pin-indicator");
+    if (isPinned && !pinEl) {
+      indicatorEl.dataset.state = "pinned";
+      (0, import_obsidian12.setIcon)(indicatorEl.createDiv({ cls: "kb-pin-indicator" }), "pin");
+    } else if (!isPinned && pinEl) {
+      indicatorEl.empty();
+      indicatorEl.dataset.state = "none";
     }
   }
-  const isHidden = ((_b = itemSettings == null ? void 0 : itemSettings.isHidden) != null ? _b : false) || isPatternHidden;
-  item.el.toggleClass("kb-hidden", isHidden);
+  if (isHidden)
+    item.el.addClass("kb-hidden");
+  else if (item.el.classList.contains("kb-hidden"))
+    item.el.removeClass("kb-hidden");
 }
 
 // src/core/explorer-manager.ts
@@ -3460,6 +3683,7 @@ var ExplorerManager = class {
     this.isPatternHidden = isPatternHidden;
     this.log = initLog("EXPLORER MANAGER", "#FF3B55");
     this.observers = [];
+    this.indicatorObserver = null;
   }
   /** 监听文件浏览器的挂载。checkExisting=true 时先查已存在的；watch=true 时重复监听 */
   observeExplorerMount(onMount, { checkExisting = false, watch = false } = {}) {
@@ -3506,12 +3730,16 @@ var ExplorerManager = class {
   /**
    * 持续观察文件浏览器的内部变化，在条目被动态渲染出来时重新应用隐藏态。
    *
-   * 为什么需要它：Obsidian 的原生树是**懒渲染**的 —— 折叠的文件夹、或启动时
-   * 尚未渲染完的条目，都不在 `view.fileItems` 里。启动瞬间调用一次 syncIndicators()
-   * 往往赶在渲染完成之前，导致「重启后隐藏失效」（条目显示出来却没人给它加 .kb-hidden）。
-   * 这里用 MutationObserver 监听容器子树变化，节流地重放隐藏态即可补齐。
+   * 为什么需要它：Obsidian 的原生树是**懒渲染/虚拟列表**的 —— 折叠的文件夹、
+   * 滚动出视口的条目，都不在 DOM 里。启动瞬间调用一次 syncIndicators()
+   * 往往赶在渲染完成之前，导致「重启后隐藏失效」。
+   *
+   * ⚠️ 这里只同步当前渲染出来的行（通常几十行），不再每次变动全量遍历
+   * `view.fileItems`：上万条目时那是一次 8ms 级的整表扫描，拖拽/滚动会明显发涩。
    */
   observeIndicatorSync(el) {
+    var _a;
+    (_a = this.indicatorObserver) == null ? void 0 : _a.disconnect();
     let scheduled = false;
     const replay = () => {
       if (scheduled)
@@ -3519,17 +3747,35 @@ var ExplorerManager = class {
       scheduled = true;
       window.requestAnimationFrame(() => {
         scheduled = false;
-        this.syncIndicators();
+        this.syncVisibleIndicators(el);
       });
     };
     const observer = new MutationObserver(replay);
     observer.observe(el, { childList: true, subtree: true });
+    this.indicatorObserver = observer;
     this.observers.push(observer);
     this.log("Indicator sync observer attached");
+  }
+  /** 只处理 DOM 里当前存在的行；虚拟列表滚出视口的行不需要状态 */
+  syncVisibleIndicators(container) {
+    const view = this.getExplorerView();
+    if (!(view == null ? void 0 : view.fileItems))
+      return;
+    const settings = this.getSettings();
+    container.querySelectorAll(".tree-item-self[data-path]").forEach((self) => {
+      const path = self.dataset.path;
+      if (!path)
+        return;
+      const item = view.fileItems[path];
+      if (!item)
+        return;
+      mountIndicator(item, settings.items[path], this.isPatternHidden(path));
+    });
   }
   disconnectObservers() {
     this.observers.forEach((obs) => obs.disconnect());
     this.observers.length = 0;
+    this.indicatorObserver = null;
     this.log("Observers disconnected");
   }
   disconnectObserver(observer) {
@@ -3601,6 +3847,7 @@ var SortFeature = class {
   init() {
     this.syncRuntimeSettings();
     this.patcher.patchVaultCopy();
+    this.dndEngine.attach();
     this.observeExplorer();
   }
   /**
@@ -3632,7 +3879,6 @@ var SortFeature = class {
           );
           this.patcher.patchExplorerSorting();
           this.sortExplorer();
-          this.dndEngine.attach(el);
           this.syncIndicators();
           this.explorerManager.observeIndicatorSync(el);
         } finally {

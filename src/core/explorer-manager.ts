@@ -8,6 +8,7 @@ const EXPLORER_SELECTOR = '[data-type="file-explorer"] > .nav-files-container';
 export class ExplorerManager {
   private readonly log = initLog("EXPLORER MANAGER", "#FF3B55");
   private readonly observers: MutationObserver[] = [];
+  private indicatorObserver: MutationObserver | null = null;
 
   constructor(
     private readonly getSettings: () => OrderSettings,
@@ -63,31 +64,52 @@ export class ExplorerManager {
   /**
    * 持续观察文件浏览器的内部变化，在条目被动态渲染出来时重新应用隐藏态。
    *
-   * 为什么需要它：Obsidian 的原生树是**懒渲染**的 —— 折叠的文件夹、或启动时
-   * 尚未渲染完的条目，都不在 `view.fileItems` 里。启动瞬间调用一次 syncIndicators()
-   * 往往赶在渲染完成之前，导致「重启后隐藏失效」（条目显示出来却没人给它加 .kb-hidden）。
-   * 这里用 MutationObserver 监听容器子树变化，节流地重放隐藏态即可补齐。
+   * 为什么需要它：Obsidian 的原生树是**懒渲染/虚拟列表**的 —— 折叠的文件夹、
+   * 滚动出视口的条目，都不在 DOM 里。启动瞬间调用一次 syncIndicators()
+   * 往往赶在渲染完成之前，导致「重启后隐藏失效」。
+   *
+   * ⚠️ 这里只同步当前渲染出来的行（通常几十行），不再每次变动全量遍历
+   * `view.fileItems`：上万条目时那是一次 8ms 级的整表扫描，拖拽/滚动会明显发涩。
    */
   observeIndicatorSync(el: HTMLElement): void {
+    this.indicatorObserver?.disconnect();
+
     let scheduled = false;
     const replay = () => {
       if (scheduled) return;
       scheduled = true;
       window.requestAnimationFrame(() => {
         scheduled = false;
-        this.syncIndicators();
+        this.syncVisibleIndicators(el);
       });
     };
 
     const observer = new MutationObserver(replay);
     observer.observe(el, { childList: true, subtree: true });
+    this.indicatorObserver = observer;
     this.observers.push(observer);
     this.log("Indicator sync observer attached");
+  }
+
+  /** 只处理 DOM 里当前存在的行；虚拟列表滚出视口的行不需要状态 */
+  private syncVisibleIndicators(container: HTMLElement): void {
+    const view = this.getExplorerView();
+    if (!view?.fileItems) return;
+
+    const settings = this.getSettings();
+    container.querySelectorAll<HTMLElement>(".tree-item-self[data-path]").forEach((self) => {
+      const path = self.dataset.path;
+      if (!path) return;
+      const item = view.fileItems[path];
+      if (!item) return;
+      mountIndicator(item, settings.items[path], this.isPatternHidden(path));
+    });
   }
 
   disconnectObservers(): void {
     this.observers.forEach((obs) => obs.disconnect());
     this.observers.length = 0;
+    this.indicatorObserver = null;
     this.log("Observers disconnected");
   }
 

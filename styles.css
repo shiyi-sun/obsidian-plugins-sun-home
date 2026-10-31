@@ -593,6 +593,13 @@ body.kb-dragging .nav-files-container [data-kb-drop-folder] > .nav-folder-title 
   color: var(--nav-item-color-highlighted);
 }
 
+/* 空根目录/空文件夹没有可画线的行：给容器一个明确的「移入这里」底色 */
+body.kb-dragging [data-type="file-explorer"] .nav-files-container > [data-kb-drop-folder] {
+  background-color: hsla(var(--interactive-accent-hsl), 0.08);
+  box-shadow: inset 0 0 0 1px hsla(var(--interactive-accent-hsl), 0.5);
+  border-radius: var(--radius-s);
+}
+
 /* 拖拽时隐藏 tooltip */
 body.kb-dragging .drag-ghost {
   display: none;

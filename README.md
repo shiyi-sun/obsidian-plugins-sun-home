@@ -159,4 +159,4 @@ The sort/pin/hide engine in `src/core/` is adapted from [Flexplorer](https://git
 
 - `minAppVersion`: 1.7.2
 - Tested with Obsidian 1.14.4.
-- The live CDP regression suite covers card/tree drag and drop, group operations, settings, migration, persistence, callouts, and cleanup (12/12 passing at release 1.6.8).
+- The live CDP regression suite covers card/tree/native drag and drop, group operations, settings, migration, persistence, callouts, and cleanup (13/13 passing at release 1.6.14).
