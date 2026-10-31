@@ -147,16 +147,6 @@ export class SortFeature {
           // 首次同步完成 → 解除启动静默（放 finally 确保异常时也能恢复）
           this.suspended = false;
         }
-
-        // 重建后重挂
-        this.explorerManager.observeExplorerMount(
-          () => {
-            this.log("Explorer remounted");
-            this.dndEngine.attach(el);
-            this.syncIndicators();
-          },
-          { watch: true }
-        );
       },
       { checkExisting: true, watch: true }
     );

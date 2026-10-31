@@ -55,6 +55,10 @@ export class DndEngine {
 
   attach(explorerEl: HTMLElement): void {
     if (explorerEl === this.explorerEl) return this.log("Already attached");
+
+    // 文件浏览器重建后必须把监听从旧节点摘掉：旧节点已脱离文档，
+    // 留着它会让 attach 把 this.explorerEl 指回死节点，新树的拖拽全部失效。
+    this.unlistenExplorer();
     this.explorerEl = explorerEl;
 
     explorerEl.addEventListener("dragstart", this.onDragStart);
@@ -69,13 +73,17 @@ export class DndEngine {
   detach(): void {
     document.removeEventListener("dragover", this.onDragOver);
     document.removeEventListener("drop", this.onDrop, { capture: true });
-
-    if (this.explorerEl) {
-      this.explorerEl.removeEventListener("dragstart", this.onDragStart);
-      this.explorerEl.removeEventListener("scroll", this.onScroll);
-      this.explorerEl.removeEventListener("dragend", this.onDragEnd);
-    }
+    this.unlistenExplorer();
     this.log("Detached");
+  }
+
+  private unlistenExplorer(): void {
+    if (!this.explorerEl) return;
+    this.explorerEl.removeEventListener("dragstart", this.onDragStart);
+    this.explorerEl.removeEventListener("scroll", this.onScroll);
+    this.explorerEl.removeEventListener("dragend", this.onDragEnd);
+    this.explorerEl = null;
+    this.explorerRect = null;
   }
 
   private readonly onDragStart = (event: DragEvent): void => {

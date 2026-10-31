@@ -3140,6 +3140,7 @@ var DndEngine = class {
   attach(explorerEl) {
     if (explorerEl === this.explorerEl)
       return this.log("Already attached");
+    this.unlistenExplorer();
     this.explorerEl = explorerEl;
     explorerEl.addEventListener("dragstart", this.onDragStart);
     document.addEventListener("dragover", this.onDragOver);
@@ -3151,12 +3152,17 @@ var DndEngine = class {
   detach() {
     document.removeEventListener("dragover", this.onDragOver);
     document.removeEventListener("drop", this.onDrop, { capture: true });
-    if (this.explorerEl) {
-      this.explorerEl.removeEventListener("dragstart", this.onDragStart);
-      this.explorerEl.removeEventListener("scroll", this.onScroll);
-      this.explorerEl.removeEventListener("dragend", this.onDragEnd);
-    }
+    this.unlistenExplorer();
     this.log("Detached");
+  }
+  unlistenExplorer() {
+    if (!this.explorerEl)
+      return;
+    this.explorerEl.removeEventListener("dragstart", this.onDragStart);
+    this.explorerEl.removeEventListener("scroll", this.onScroll);
+    this.explorerEl.removeEventListener("dragend", this.onDragEnd);
+    this.explorerEl = null;
+    this.explorerRect = null;
   }
   isPointerInsideExplorer() {
     const rect = this.explorerRect;
@@ -3457,24 +3463,26 @@ var ExplorerManager = class {
   }
   /** 监听文件浏览器的挂载。checkExisting=true 时先查已存在的；watch=true 时重复监听 */
   observeExplorerMount(onMount, { checkExisting = false, watch = false } = {}) {
+    let mountedEl = null;
     if (checkExisting) {
       const explorerEl = document.querySelector(EXPLORER_SELECTOR);
       if (explorerEl) {
+        mountedEl = explorerEl;
         onMount(explorerEl);
         if (!watch)
           return;
       }
     }
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of Array.from(mutation.addedNodes)) {
-          if (node.instanceOf(HTMLElement) && node.matches(EXPLORER_SELECTOR)) {
-            if (!watch)
-              this.disconnectObserver(observer);
-            return onMount(node);
-          }
-        }
-      }
+    const observer = new MutationObserver(() => {
+      if (mountedEl == null ? void 0 : mountedEl.isConnected)
+        return;
+      const explorerEl = document.querySelector(EXPLORER_SELECTOR);
+      if (!explorerEl)
+        return;
+      mountedEl = explorerEl;
+      onMount(explorerEl);
+      if (!watch)
+        this.disconnectObserver(observer);
     });
     observer.observe(document.body, { childList: true, subtree: true });
     this.observers.push(observer);
@@ -3630,14 +3638,6 @@ var SortFeature = class {
         } finally {
           this.suspended = false;
         }
-        this.explorerManager.observeExplorerMount(
-          () => {
-            this.log("Explorer remounted");
-            this.dndEngine.attach(el);
-            this.syncIndicators();
-          },
-          { watch: true }
-        );
       },
       { checkExisting: true, watch: true }
     );

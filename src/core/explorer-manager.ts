@@ -20,23 +20,27 @@ export class ExplorerManager {
     onMount: (el: HTMLElement) => void,
     { checkExisting = false, watch = false }: { checkExisting?: boolean; watch?: boolean } = {}
   ): void {
+    let mountedEl: HTMLElement | null = null;
+
     if (checkExisting) {
       const explorerEl = document.querySelector<HTMLElement>(EXPLORER_SELECTOR);
       if (explorerEl) {
+        mountedEl = explorerEl;
         onMount(explorerEl);
         if (!watch) return;
       }
     }
 
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of Array.from(mutation.addedNodes)) {
-          if (node.instanceOf(HTMLElement) && node.matches(EXPLORER_SELECTOR)) {
-            if (!watch) this.disconnectObserver(observer);
-            return onMount(node as HTMLElement);
-          }
-        }
-      }
+    // 文件浏览器重建时，新容器往往不是 mutation.addedNodes 里那个节点本身
+    // （它可能被包在新父节点里一起插入），所以不能只匹配直接新增节点。
+    // 旧容器一脱离文档就重新查当前容器；正常渲染期间旧容器仍在文档里，直接跳过。
+    const observer = new MutationObserver(() => {
+      if (mountedEl?.isConnected) return;
+      const explorerEl = document.querySelector<HTMLElement>(EXPLORER_SELECTOR);
+      if (!explorerEl) return;
+      mountedEl = explorerEl;
+      onMount(explorerEl);
+      if (!watch) this.disconnectObserver(observer);
     });
     observer.observe(document.body, { childList: true, subtree: true });
     this.observers.push(observer);
