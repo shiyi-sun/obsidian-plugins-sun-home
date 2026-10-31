@@ -1,285 +1,162 @@
-# sun-kb-home（知识库管理）
+# sun-kb-home
 
-## English
+A two-level knowledge-base browser for Obsidian. The home view becomes a card wall of knowledge bases; clicking a card opens only that knowledge base's file tree.
 
-Turn the home view into a **knowledge-base card wall**. The default sidebar shows one giant file tree; this plugin splits it into two levels: a card wall of knowledge bases, and the file tree of the one you click.
+[简体中文](README.zh-CN.md)
 
-- **Knowledge base** — a direct subfolder of a group folder, or a root-level folder that is not registered as a group.
-- **Group** — a real folder in the vault root. Creating, renaming, deleting, or dragging into a group moves real folders; `data.json` only stores registrations, ordering, and display overrides. Deleting a group moves its contents back to the vault root and never deletes notes.
-- **Single-vault tree** — clicking a card shows only that knowledge base's tree in the left sidebar. Rows reuse the native `nav-folder` / `nav-file` DOM, so indentation, hover states, hotkeys, and themes keep working.
-- **Card styles** — Settings → sun-kb-home → Card style: bordered, light gray, or divider.
-- **Drag and drop** — reorder cards, drag cards between groups (moves the folder), reorder groups by dragging their headers, and drag items inside the tree.
-- **Sort, pin, hide** — shared with the native file explorer: custom order, pin to top, hide (with glob rules), all stored once in `data.json`.
-- **Callouts** — `:::tip / note / info / warning / danger` blocks render in both Live Preview and Reading view, with optional titles and collapsible variants.
+## Why
 
-**Install:** copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/sun-home/`, then enable **sun-kb-home** under Settings → Community plugins. Requires Obsidian 1.7.2 or newer. To build from source: `npm install --ignore-scripts && npm run build`.
-
-Licensed under MIT.
-
-## 中文
-
-把 Obsidian 首页变成**知识库卡片墙**：打开 Obsidian 先看到你的知识库列表，点进去才进入该库的树状目录。
-
-## 解决的问题
-
-Obsidian 默认左侧是一整棵文件树，所有库的内部分支全挤在一个面板里，一展开就无限长。
-本插件把它改成两级结构：
+Obsidian's file explorer shows every folder of every project in one long tree. sun-kb-home splits that into two levels:
 
 ```
-知识库列表（卡片墙）  →  某个知识库的内部树（目录 / 笔记）
-      ↑ 首页                         ↑ 点击卡片后
+Knowledge-base cards  →  the tree of one knowledge base
+       (home view)                (after clicking a card)
 ```
 
-## 核心概念
+Groups are real folders. Notes remain ordinary Markdown files; the plugin does not copy them into a database.
 
-| 概念 | 对应关系 |
-|---|---|
-| **知识库** | 分组文件夹的**直接子文件夹**；或根目录下未被登记为分组的文件夹（未分组知识库） |
-| **分组** | vault 根目录下的**一层真实文件夹**；组内知识库就是它的直接子文件夹 |
-| **文档** | 知识库文件夹里的 `.md` 文件（含任意子层级） |
+## Concepts
 
-分组不是虚拟标签：新建分组会在 vault 根目录创建同名文件夹；把卡片拖进分组、重命名分组、删除分组都会**真实操作文件夹**。`data.json` 只保存分组登记、排序与显示覆盖，不复制文件内容。
+| Term | Meaning |
+| --- | --- |
+| Knowledge base | A direct subfolder of a group folder, or a root-level folder that is not registered as a group. |
+| Group | A real folder in the vault root. Creating, renaming, moving, or deleting a group operates on real folders. |
+| Tree | The native-style file tree for one knowledge base. |
 
-## 功能
+`data.json` stores group registrations, ordering, and display overrides only. File contents stay in the vault.
 
-- **紧凑行卡**：每组一个分区；图标、库名、文档数在同一行，一屏能放下更多知识库。
-  未自定义图标时使用线性书本图标，自定义 emoji 仍然保留。被隐藏的文件夹不进列表
-- **三种卡片外观**：设置 → sun-kb-home → 卡片样式，可随时切换「线框 / 浅灰背景 / 分隔线」，
-  切换后立即生效并记住选择；库多时推荐分隔线，库少时浅灰底更成块
-- **分组就是一层真实文件夹**：新建分组会创建文件夹；组内「新建知识库」直接建在分组文件夹里；
-  卡片跨组拖拽 = 移动文件夹；分组改名 = 文件夹改名；删除分组 = 组内内容移回根目录后删除空文件夹
-- **点击进入**：左侧栏切换为该知识库的单库树，只显示这一个库
-- **单库树就是原生文件树的样子**：行 DOM 直接复用原生的 `nav-folder` / `nav-file` /
-  `collapse-icon` 结构，缩进、参考线、hover、当前文件高亮、按钮全交给 app.css 与主题
-- **编辑即时新建**：树工具条的「新建笔记」与原生文件树一致，单击即建（重名自动加序号）
-- **提示块（`:::` 语法）**：`:::tip / note / info / warning / danger` 渲染成带图标的提示框，
-  支持自定义标题（`:::tip 标题` 或 `:::tip[标题]`）、可折叠（`:::tip+` 展开、`:::tip-` 收起）、
-  嵌套块，以及正文里的行内语法（`**粗体**`、`` `代码` ``、链接照常显示）；
-  实时预览与阅读视图都渲染，两处各有独立开关。
-  整块比周围正文小一档（`0.875em`，跟着你的编辑器/阅读字号走），标题与正文同级、
-  靠字重和颜色分层。标题与正文之间的缝 = 框的内边距 = 16px；这条缝用 **margin** 而不是
-  flex 的 `gap`——实时预览里 `.cm-content > div` 会把块的 `display` 拍成 `block`，
-  `gap` 直接失效（实测缝=0，只有编辑视图挤、阅读视图正常）。
-  回归钉子见 `scripts/cdp/t13-admonition.mjs`：`A1b`（实时预览）与 `A6c`（阅读视图）
-  两个场景各钉一份「字号 + 缝」，`A6b` 再钉一次阅读侧的缝——只钉一个场景会漏
-- **卡片拖拽排序**：卡片可拖动调换顺序，顺序自动保存
-- **卡片跨组拖拽**：拖到别的分组即**移动知识库文件夹**；有分组时「未分组」区域始终存在，
-  把卡片拖过去就移回 vault 根目录
-- **树内拖拽**：与原生文件树同能力——同级调序、拖进文件夹、**跨文件夹落到某个条目的上/下沿
-  即移进那个文件夹**、拖回库根标题即移回根目录、重名自动避让、停在折叠文件夹上一秒自动展开
-- **分组折叠**：点击分组标题可折叠 / 展开
-- **分组排序**：拖动分组标题可调整分组之间的显示顺序，上/下沿会显示落点指示线；
-  顺序写入 `data.json`。「未分组」固定在末尾，不参与分组排序
-- **新建知识库 / 分组**：顶部两个按钮，或右键分组标题（不再在每个分组末尾挂一张虚线新建大卡）
-- **编辑知识库**：卡片悬停出现 `⋯`，可改名、换 emoji 图标、移入分组；移分组同样是真实移动文件夹
-- **旧分组迁移**：首次加载时弹窗确认，把旧版虚拟分组落成真实文件夹，成员知识库连同
-  排序 / 隐藏 / 名称覆盖记录一起迁移；点「稍后」可以之后在设置页或命令里再来
-- **明暗主题自适应**：沿用 Obsidian 主题变量
+## Features
 
-### 分组文件夹的结构
+### Card wall
+
+- One compact row per knowledge base: icon, name, document count.
+- Three card styles: **bordered**, **light gray**, and **divider** (Settings → sun-kb-home → Card style).
+- Folders hidden by the hide setting do not appear as cards unless **Show hidden files** is enabled.
+- Create, rename, change icon, move between groups, and delete from the card menu (`⋯`) or the right-click menu.
+
+### Groups are real folders
+
+- **New group** creates a real folder in the vault root.
+- Drag a card into another group to move its knowledge-base folder into that group.
+- Rename or delete a group by renaming or deleting the real folder. Deleting a group first moves its contents back to the vault root; notes are never deleted.
+- Only direct subfolders of a group become knowledge-base cards. Files placed directly inside a group stay in the native file tree and do not become cards.
+
+### Drag and drop
+
+- **Cards:** drag to reorder. A vertical accent line shows the insertion point: drop on the left half of a card to insert before it, or on the right half to insert after it.
+- **Groups:** drag a group header to reorder groups; a line shows before/after.
+- **Tree:** reorder siblings, drop into a folder, drop on an item's top/bottom edge to move into that folder at that position, or drop on the root title to move back to the knowledge-base root.
+- Folder rows show an insertion line near the top/bottom 30% and a clear "move into" highlight in the middle 40%.
+- Dropping a card back into its own group is a no-op and does not highlight the whole group.
+- Hovering a collapsed folder for about one second expands it during a drag.
+- A name collision during a move is resolved automatically with a numbered suffix.
+
+### Native file explorer integration
+
+- Custom order, pin to top, hide (manual or glob rules), and sort modes: custom, name, created time, modified time.
+- One source of truth in `data.json`: the native explorer, the single-knowledge-base tree, and the card wall share the same order/pin/hide data.
+- When hidden files are not shown, hidden root folders do not appear as knowledge-base cards.
+- Multi-select drag, edge auto-scroll, and drop-into-folder work in the native explorer.
+
+### Callouts
+
+- `:::note`, `:::tip`, `:::info`, `:::warning`, `:::danger`.
+- Optional title (`:::tip Title` or `:::tip[Title]`), collapsible variants (`:::tip+` / `:::tip-`), and nesting.
+- Rendered in both Live Preview and Reading view; each view can be toggled independently.
+- Inline Markdown works inside the body.
+
+## How groups work
 
 ```
 vault/
-├─ 工作/                 ← 分组（真实文件夹）
-│  ├─ 中医手册/          ← 知识库（卡片）
-│  └─ 编程/              ← 知识库（卡片）
-├─ 生活/                 ← 分组
-│  └─ 旅行/              ← 知识库
-└─ 杂项/                 ← 根目录下未登记为分组的文件夹 = 未分组知识库
+├─ Work/                  ← group (real folder)
+│  ├─ Manuals/            ← knowledge base (card)
+│  └─ Code/               ← knowledge base (card)
+├─ Life/                  ← group
+│  └─ Travel/             ← knowledge base
+└─ Misc/                  ← unregistered root folder = ungrouped knowledge base
 ```
 
-- 分组只能通过插件登记：在卡片墙点「＋ 新建分组」，或在设置里把现有根目录文件夹设为分组。
-  直接在外面新建一个根目录文件夹，默认会被当作**未分组知识库**。
-- 分组文件夹里直接放的笔记 / 文件不会成为卡片（仍可在原生文件树里打开）；只有**直接子文件夹**是知识库。
-- 删除分组时，组内所有直接内容会先移回 vault 根目录（知识库变成未分组），再删除已空的分组文件夹；
-  不会递归删除笔记。移出失败时会保留分组并提示。
+- A root folder becomes a group only when registered through the plugin (New group, or Settings → Groups → "Use an existing folder as a group"). Other root folders are ungrouped knowledge bases.
+- Only direct subfolders are knowledge bases; deeper folders are internal folders of a knowledge base.
+- Deleting a group returns its direct contents to the vault root, then removes the empty group folder. It never recursively deletes notes. If a move fails, the group is kept and an error is shown.
 
-### 知识库树内的拖拽
+## Installation
 
-进入某个知识库后，左侧树里的条目可以直接拖动，落点语义与原生文件树一致：
+**From Obsidian Community plugins:** search for **sun-kb-home**, install, and enable it.
 
-| 落点 | 效果 |
-|---|---|
-| 同级条目的**上/下沿** | 排到它前面 / 后面（自动切到「自定义顺序」） |
-| **另一个文件夹里的条目上/下沿** | 移进那个文件夹，并插到该位置（跨文件夹） |
-| **文件夹行中间** | 移入该文件夹（真实移动文件） |
-| **库根标题行** | 移回知识库根目录 |
-| 在折叠的文件夹行中间**停一秒** | 自动展开该文件夹，可继续往深层拖 |
+**Manual:**
 
-跨文件夹是「移动」，不会顺手把那个文件夹改成自定义顺序；只有同层换位才切模式
-（顶部排序按钮随时可切回按名称/时间排序）。
+1. Download `sun-home-<version>-plugin.zip` from Releases, or build from source.
+2. Copy `main.js`, `manifest.json`, and `styles.css` to `<vault>/.obsidian/plugins/sun-home/`.
+3. Enable **sun-kb-home** in Settings → Community plugins.
 
-**顺序只有一份**：单库树读写的是 `data.json` 里 `order.items[文件夹]` 的
-`sortOrder` / `customOrder` —— 与原生文件浏览器完全同一份数据。在单库树里拖出来的顺序，
-切到侧栏原生树立刻是同一个顺序，反过来也一样；顶部「排序方式」作用于本库的全部文件夹，
-原生树的右键「排序方式」仍可逐个文件夹微调。移动本身会改动文件系统（与原生拖拽一样）。
+After a manual copy, enable the plugin once in Community plugins. Obsidian then records it in `community-plugins.json`, so it stays enabled after restart. Do not edit that file while Obsidian is running.
 
-### 文件排序、置顶与隐藏（整合自 Flexplorer）
+Requires Obsidian **1.7.2** or newer. The plugin UI is currently in Chinese; the command names below are shown as they appear in Obsidian.
 
-以下功能作用于 **Obsidian 原生文件浏览器**，可直接拖拽调整文件顺序：
+Configurations from the old `kb-home` plugin id or from virtual groups are migrated on first load. If you deferred the group migration, the command palette still has **Migrate legacy groups to real folders**.
 
-- **拖拽排序**：文件夹内任意拖动条目调整顺序，支持拖入文件夹、多选拖拽、边缘自动滚动
-- **置顶**：右键文件或文件夹 →「置顶」，条目固定到列表顶部并显示图钉
-- **隐藏**：右键 →「隐藏」，条目不再显示（可在设置里开启「显示被隐藏的文件」以半透明方式查看）。
-  这一个标记同时管三处：原生文件树、单库树、以及知识库列表——根目录的文件夹被隐藏后
-  就不会再作为知识库卡片冒头
-- **排序方式**：右键文件夹 →「排序方式」，可选自定义顺序 / 名称 / 创建时间 / 修改时间
-- **glob 隐藏规则**：在设置里按 gitignore 风格批量隐藏，例如 `*.tmp`、`草稿/**`
+## Usage
 
-> 本部分代码整合自 [Flexplorer](https://github.com/kh4f/flexplorer)（MIT License, by kh4f）。
+1. Open the knowledge-base list from the ribbon (library icon) or the command palette.
+2. Create groups and knowledge bases with the toolbar buttons, or register an existing root folder as a group in Settings.
+3. Drag cards to reorder them or move them between groups.
+4. Click a card to open that knowledge base's tree; use "← All knowledge bases" to return.
+5. In the tree, use the toolbar to create notes or folders, change the sort mode for the whole knowledge base, collapse/expand all, or reveal the active note.
+6. Right-click items for open/new tab, rename, delete, copy path, reveal in system file manager, pin, hide, and sort actions.
 
+## Settings
 
-## 安装
+- **Open knowledge-base list on startup** — enabled by default.
+- **Card style** — bordered, light gray, or divider.
+- **Rescan knowledge bases** — refresh after creating folders outside Obsidian.
+- **Group management** — view the real folder behind each group, register an existing root folder as a group, and delete groups.
+- **Sort & hide** — show hidden files, manage hidden items individually, choose where new items are inserted, keep custom order on create/delete, configure gitignore-style glob rules, and enable debug logging.
+- **Callouts** — separate toggles for Live Preview and Reading view.
 
-### 手动安装
+## Commands
 
-1. 构建产物（见下），得到 `main.js`、`manifest.json`、`styles.css`
-2. 在你的 vault 里创建目录：`.obsidian/plugins/sun-home/`
-3. 把上述三个文件复制进去
-4. Obsidian → 设置 → 第三方插件 → 关闭「安全模式」→ 找到 **sun-kb-home**（id: `sun-home`）→ 启用
+Open the command palette and search for `sun-kb-home`:
 
-> **关于「重启后插件被关闭」**：手动复制文件夹安装的插件，Obsidian **不会**自动把它的 id 写进
-> `.obsidian/community-plugins.json`，所以重启后会被当成未启用。
-> **解决办法：在「设置 → 第三方插件」里用开关启用一次。** 这个动作会让 Obsidian 自己把
-> `sun-home` 登记进清单，之后开开关关都由它维护，不会再丢。
->
-> 注意：不要手动去编辑这个文件——Obsidian 退出时会用内存里的状态整体覆写它，
-> 手动改动会被抹掉；若确实要改，先完全退出 Obsidian。
+- `打开知识库列表` — Open the knowledge-base list
+- `打开当前笔记所在知识库的目录` — Open the tree for the active note's knowledge base
+- `显示 / 隐藏被隐藏的文件` — Toggle hidden files
+- `迁移旧分组到真实文件夹` — Migrate legacy groups (only needed for very old configurations)
 
-### 从 kb-home 改名为 sun-home
+Two ribbon icons mirror the first two commands.
 
-插件 id 从 `kb-home` 改为 `sun-home`；显示名改为 `sun-kb-home`，以符合 Obsidian 官方目录只允许 Basic Latin 字符的命名规则。插件内的界面文案仍继续使用「知识库」等中文。
+## Known limitations
 
-1. 把新版本安装到 `.obsidian/plugins/sun-home/`，在第三方插件里只启用 **sun-home**
-2. 首次加载会自动读取旧目录 `.obsidian/plugins/kb-home/data.json`，把分组、
-   排序、隐藏、名称覆盖等配置迁到新目录，并弹一次提示
-3. 确认数据正常后，可以删除旧的 `.obsidian/plugins/kb-home/` 目录
-4. 如果给旧命令绑定过快捷键，需要重新绑定：命令前缀已从 `kb-home:` 变为 `sun-home:`
-5. 先不要删除旧目录再首次启动，否则没有旧配置可迁
+- Groups are one level deep; nested groups are not supported.
+- Files placed directly in a group folder are not knowledge-base cards. They remain accessible in the native file tree.
+- Folders starting with `.` and folders matching a hide rule are not listed.
+- Renaming a group or knowledge base does not rewrite old paths in glob hide rules; update the rules manually.
+- Moving or deleting groups operates on real folders. Obsidian updates internal links, but external tools, absolute paths, or references created outside Obsidian may need manual fixes.
+- Callouts: in Reading view, block elements separated from the rest of a callout by a blank line may fall outside the box. Live Preview does not have this issue. Inline Markdown in callout titles renders in Live Preview but is plain text in Reading view.
+- The Reading-view callout renderer rewrites Obsidian-rendered DOM; other plugins that also rewrite the preview DOM may interact with it.
 
-### 从源码构建
+## Build from source
 
 ```bash
-# 需要 Node.js（开发环境用 Node 24）
-npm install --ignore-scripts   # Windows 上 esbuild 的 postinstall 可能报 EBUSY
-npm run build                  # 一次性构建，产出 main.js
-npm run dev                    # 监听模式，改源码自动重打包
-
-# 类型检查（可选）
-npx tsc --noEmit
+npm install --ignore-scripts
+npm run build        # production main.js
+npm run dev          # watch mode
+npm run typecheck    # TypeScript check
 ```
 
-构建完成后 `main.js` 生成在项目根目录，与 `manifest.json`、`styles.css` 一起就是完整插件。
+`main.js` is written to the project root; combine it with `manifest.json` and `styles.css`.
 
-> **为什么加 `--ignore-scripts`**：esbuild 的安装后脚本会在 Windows 上尝试自校验，
-> 若此时有 node 进程被占用会报 `EBUSY`。跳过脚本不影响使用——
-> 平台包 `@esbuild/win32-x64` 会正常装好。
+On Windows, `--ignore-scripts` avoids an esbuild postinstall `EBUSY`; the platform package is still installed normally.
 
-### 源码包结构
+## Credits and license
 
-```
-obsidian-sun-home/
-├── src/
-│   ├── main.ts              插件入口（视图注册、命令、弹窗、设置面板）
-│   ├── data.ts              知识库扫描与数据模型
-│   ├── view-home.ts         卡片墙视图（kb-home-view）
-│   ├── view-tree.ts         单库树视图（kb-tree-view，含拖拽排序）
-│   ├── framework/
-│   │   └── feature.ts       功能底座：Feature 契约 + 注册表（装配期钩子、逐个故障隔离）
-│   ├── features/
-│   │   ├── admonition/      提示块功能（parser / editor / reading / index）
-│   │   └── sort-order/      排序 / 置顶 / 隐藏 功能（包住 core/ 引擎 + 自己的设置小节）
-│   └── core/                排序 / 置顶 / 隐藏 引擎（移植自 Flexplorer）
-├── scripts/
-│   ├── smoke-order.js       排序逻辑冒烟测试（node scripts/smoke-order.js）
-│   └── cdp/                 真实 Obsidian 里的实机回归用例（npm run test:live）
-├── manifest.json            插件清单（id 必须与目录名一致）
-├── styles.css               全部样式
-├── esbuild.config.mjs       构建配置
-└── tsconfig.json
-```
+MIT.
 
-> `node_modules/` 和构建产物 `main.js`、`dist/` 未包含在源码包中，
-> 前者用 `npm install` 还原，后者用 `npm run build` 生成。
-构建完成后 `main.js` 生成在项目根目录。
+The sort/pin/hide engine in `src/core/` is adapted from [Flexplorer](https://github.com/kh4f/flexplorer) (MIT, by kh4f). Callout support is based on the earlier admonition-blocks implementation. See `LICENSE`.
 
-## 使用说明
-
-1. 首次启用后，插件会自动在主区域打开知识库列表
-2. 根目录下未登记为分组的文件夹会成为「未分组」知识库卡片；分组文件夹的直接子文件夹成为组内卡片
-3. 点「＋ 新建分组」会在根目录创建真实文件夹，再用卡片上的 `⋯` 或直接拖拽把知识库移进去
-4. 点卡片进入该库，左侧栏显示它的树；点「← 全部知识库」返回
-5. 从旧版升级时，首次加载会提示把虚拟分组迁移成真实文件夹；迁移只移动文件夹，
-   不删除笔记，路径相关的排序 / 隐藏 / 名称记录会一起更新
-
-## 设置项
-
-- **启动时自动打开知识库列表**：默认开启
-- **重新扫描知识库**：在外部新增了文件夹后点此刷新
-- **分组管理**：查看分组对应的真实文件夹、删除分组；有旧虚拟分组时提供「开始迁移」
-- **把现有文件夹设为分组**：把某个根目录文件夹登记为分组，它的直接子文件夹变成知识库卡片
-- **排序与隐藏**：显示被隐藏的文件、新建插入位置、增删时保持顺序、隐藏规则（glob）、已隐藏项逐个恢复。
-  这一节管的就是**唯一一份**顺序/置顶/隐藏数据，原生文件浏览器和本插件的单库树、知识库列表都读它
-- **提示块**：「实时预览中渲染」与「阅读视图渲染」两个独立开关，都默认开
-
-## 功能底座（加新功能用）
-
-附加功能实现 `src/framework/feature.ts` 的 `Feature` 契约后，塞进 `main.ts` 里的
-`new FeatureRegistry([…])` 列表即可，不用再去 `onload` / `onunload` / 设置面板分散插刀：
-
-- `attach(ctx)` 只在**装配期**调用，注册口（视图 / 命令 / 编辑器扩展 / markdown 后处理器 /
-  事件 / 设置小节）由 `ctx` 转发给 Obsidian，卸载自动回收
-- 每个功能各自包 try/catch：某功能装配失败只降级它自己，**不会把整个插件带进
-  「加载失败 → 下次启动静默禁用」**（这个事故在 1.3.x 真发生过，见 `main.ts` 注释）
-- 钩子不进运行期热路径：编辑器扩展与后处理器是 Obsidian 直接调功能自己的函数，
-  底座只在装配那一圈循环里出现（微秒级）
-- 设置页里每个功能自己那一节由 `renderSettings` 贡献（注册表统一加 h2 标题）。插件级的
-  「开启调试日志」仍留在主体 —— logger 是全局的，不属于某个功能
-
-现在挂在底座上的功能：`sort`（排序 / 置顶 / 隐藏，包住 `core/` 引擎）、`admonition`（提示块）。
-核心视图可以依赖功能（知识库树的右键菜单借 `plugin.sortFeature?.addFileMenuItems(...)` 往菜单里
-注入排序项），反向依赖才要避免。加第三个功能只要实现契约、塞进 `main.ts` 的那个数组。
-
-## 命令
-
-- `sun-kb-home: 打开知识库列表`
-- `sun-kb-home: 打开当前笔记所在知识库的目录`
-- `sun-kb-home: 迁移旧分组到真实文件夹`
-- `sun-kb-home: 显示 / 隐藏被隐藏的文件`（由 `sort` 功能自己注册）
-
-左侧栏也有两个 ribbon 图标对应这两个命令。
-
-## 已知限制
-
-- 分组登记保存在 `data.json`，**分组本身是真实文件夹**；重装插件前仍建议备份 `data.json`
-- 外部新建的根目录文件夹默认是「未分组知识库」，不会被自动当成分组；要当分组用，
-  请在设置里「把现有文件夹设为分组」
-- 只有分组文件夹的**直接子文件夹**会成为知识库；更深的层级属于该知识库内部目录
-- 分组文件夹里直接放的笔记 / 文件不会出现在卡片墙（仍可在原生文件树里打开）
-- 以 `.` 开头的文件夹、以及被上面「隐藏」规则命中的文件夹，都不会作为知识库出现在列表里
-- 重命名分组或知识库不会改写 glob 隐藏规则里的旧路径，需要时请手动调整
-- 迁移与删组会真实移动文件夹；Obsidian 会同步更新内部链接，但外部工具、绝对路径或
-  未走 Obsidian 的引用需要自行检查
-- **提示块：阅读视图里跨空行的块级元素会留在框外**（实测确认；对应回归钉子
-  `scripts/cdp/t13-admonition.mjs` 的 `A6limit`，将来修好它会转红）。
-  正文里的**行内语法照常显示**（粗体、行内代码、链接）—— 搬的是 Obsidian 已经渲染好的节点，
-  不花额外代价。但一个提示块内部若用空行隔开再放**表格 / 小标题 / 代码块**，
-  markdown 后处理器是按段调用的，那个元素会落在另一次调用里，于是留在框外。
-  实时预览（编辑时）没有这个问题；嵌套提示块两条链路都正常。
-  本机语料实测：536 篇里 `:::` 共 3 处，全是一行文字的 `::: warning …`，没有这种写法，
-  所以没有为它引入跨段状态机（跨段要求"未闭合就继续吞后面的段"，一个打错的 `:::tip`
-  就会把整篇吞进框里，风险大于收益）。
-- **提示块标题里的行内语法只在实时预览里渲染**，阅读视图按纯文本显示（同一处不对称）。
-- 提示块的阅读渲染会改写 Obsidian 已渲染的 DOM。若与其它同样改写预览 DOM 的插件
-  （自定义 CSS 类、其它 admonition 类插件）同时启用，先后顺序可能互相影响
-
-## 许可证
-
-MIT。整合自 Flexplorer 的部分（见上文）仍保留其 MIT 版权声明。
-
-## 兼容性
+## Compatibility
 
 - `minAppVersion`: 1.7.2
-- 已在 Obsidian 1.14.4 上验证：真实文件夹分组的旧组迁移、新建分组、组内建库、
-  跨组拖拽（含拖回根目录）、分组改名 / 删除、单库树路径跟随、编辑弹窗移动分组；
-  以及提示块：实时预览渲染、光标进出回退源码、阅读视图渲染、折叠展开、两个开关、增量重算探针
+- Tested with Obsidian 1.14.4.
+- The live CDP regression suite covers card/tree drag and drop, group operations, settings, migration, persistence, callouts, and cleanup (12/12 passing at release 1.6.8).
