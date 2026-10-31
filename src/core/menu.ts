@@ -23,11 +23,12 @@ export interface MenuHost {
   ensureItemSettings: (file: TAbstractFile) => ItemSettings;
   app: App;
   orderManager: { move: (a: string, b: string) => void; getSortedItems: (s: any, i: any) => any };
-  getExplorerView: () => any;
   sortExplorer: () => void;
   syncIndicators: () => void;
   /** 立即写盘（用户显式操作使用，保证不丢） */
   saveSettingsNow: () => void | Promise<void>;
+  /** 置顶/隐藏/排序变化后通知调用方刷新自己的视图 */
+  onChanged?: () => void;
 }
 
 /** 往文件和文件夹的右键菜单里加「置顶 / 隐藏 / 排序」 */
@@ -55,6 +56,7 @@ export function populateFileMenu(menu: Menu, file: TAbstractFile, host: MenuHost
         void host.saveSettingsNow();
         host.sortExplorer();
         host.syncIndicators();
+        host.onChanged?.();
       })
   );
 
@@ -67,6 +69,7 @@ export function populateFileMenu(menu: Menu, file: TAbstractFile, host: MenuHost
         // 用户显式操作 → 立即写盘，不走防抖
         void host.saveSettingsNow();
         host.syncIndicators();
+        host.onChanged?.();
       })
   );
 }
@@ -87,6 +90,7 @@ export function populateSortMenu(
           folderSettings.sortOrder = sortOrder;
           void host.saveSettingsNow();
           host.sortExplorer();
+          host.onChanged?.();
         })
     );
   });
@@ -97,12 +101,17 @@ export function populateSortMenu(
         if (folderSettings.sortOrder === "custom" || !isConfirmed) return;
         const folder = host.app.vault.getAbstractFileByPath(folderPath);
         if (!(folder instanceof TFolder)) return;
-        const items = host.getExplorerView()?.getSortedFolderItems?.(folder) ?? [];
-        const sortedItems = host.orderManager.getSortedItems(folderSettings, items);
+        // 单库树显示时原生 Files 面板并不在前台，不能依赖它的 getSortedFolderItems；
+        // 直接对文件夹全部子项按当前显示规则排序再固化。
+        const sortedItems = host.orderManager.getSortedItems(
+          folderSettings,
+          folder.children.map((file) => ({ file }))
+        );
         folderSettings.customOrder = sortedItems.map((i: any) => i.file.name);
         folderSettings.sortOrder = "custom";
         void host.saveSettingsNow();
         host.sortExplorer();
+        host.onChanged?.();
       }).open();
     })
   );

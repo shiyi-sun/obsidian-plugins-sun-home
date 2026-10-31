@@ -8,56 +8,77 @@ const EXPLORER_SELECTOR = '[data-type="file-explorer"] > .nav-files-container';
 export class ExplorerManager {
   private readonly log = initLog("EXPLORER MANAGER", "#FF3B55");
   private readonly observers: MutationObserver[] = [];
-  private indicatorObserver: MutationObserver | null = null;
+  private readonly indicatorObservers = new Map<HTMLElement, MutationObserver>();
 
   constructor(
     private readonly getSettings: () => OrderSettings,
-    private readonly getExplorerView: () => any,
+    private readonly getExplorerViews: () => any[],
     private readonly isPatternHidden: (path: string) => boolean
   ) {}
 
-  /** 监听文件浏览器的挂载。checkExisting=true 时先查已存在的；watch=true 时重复监听 */
+  /** 监听所有文件浏览器容器的挂载；watch=true 时持续观察后续新建（重建/多面板） */
   observeExplorerMount(
     onMount: (el: HTMLElement) => void,
     { checkExisting = false, watch = false }: { checkExisting?: boolean; watch?: boolean } = {}
   ): void {
-    let mountedEl: HTMLElement | null = null;
+    const mounted = new Set<HTMLElement>();
 
-    if (checkExisting) {
-      const explorerEl = document.querySelector<HTMLElement>(EXPLORER_SELECTOR);
-      if (explorerEl) {
-        mountedEl = explorerEl;
-        onMount(explorerEl);
-        if (!watch) return;
+    const scan = (): void => {
+      for (const el of [...mounted]) {
+        if (!el.isConnected) mounted.delete(el);
       }
-    }
+      document.querySelectorAll<HTMLElement>(EXPLORER_SELECTOR).forEach((el) => {
+        if (mounted.has(el)) return;
+        mounted.add(el);
+        onMount(el);
+      });
+    };
+
+    if (checkExisting) scan();
+    if (!watch) return;
 
     // 文件浏览器重建时，新容器往往不是 mutation.addedNodes 里那个节点本身
-    // （它可能被包在新父节点里一起插入），所以不能只匹配直接新增节点。
-    // 旧容器一脱离文档就重新查当前容器；正常渲染期间旧容器仍在文档里，直接跳过。
-    const observer = new MutationObserver(() => {
-      if (mountedEl?.isConnected) return;
-      const explorerEl = document.querySelector<HTMLElement>(EXPLORER_SELECTOR);
-      if (!explorerEl) return;
-      mountedEl = explorerEl;
-      onMount(explorerEl);
-      if (!watch) this.disconnectObserver(observer);
+    // （它可能被包在新父节点里一起插入），所以检查新增节点的子树。
+    // 只有确实出现新容器、或有容器脱离文档时才重扫，避免每次 DOM 变动都查询全页。
+    const observer = new MutationObserver((mutations) => {
+      let changed = false;
+      for (const record of mutations) {
+        for (const node of Array.from(record.addedNodes)) {
+          if (!(node instanceof HTMLElement)) continue;
+          if (node.matches(EXPLORER_SELECTOR) || node.querySelector(EXPLORER_SELECTOR)) {
+            changed = true;
+            break;
+          }
+        }
+        if (changed) break;
+      }
+      if (!changed) {
+        for (const el of mounted) {
+          if (!el.isConnected) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed) scan();
     });
     observer.observe(document.body, { childList: true, subtree: true });
     this.observers.push(observer);
   }
 
-  /** 同步所有条目的置顶图钉与隐藏态 */
+  /** 同步所有面板、所有条目的置顶图钉与隐藏态 */
   syncIndicators(): void {
-    const view = this.getExplorerView();
-    if (!view?.fileItems) return;
+    const views = this.getExplorerViews();
     const settings = this.getSettings();
     let applied = 0;
-    Object.values(view.fileItems).forEach((item: any) => {
-      if (!item?.file?.path) return;
-      mountIndicator(item, settings.items[item.file.path], this.isPatternHidden(item.file.path));
-      applied++;
-    });
+    for (const view of views) {
+      if (!view?.fileItems) continue;
+      Object.values(view.fileItems).forEach((item: any) => {
+        if (!item?.file?.path) return;
+        mountIndicator(item, settings.items[item.file.path], this.isPatternHidden(item.file.path));
+        applied++;
+      });
+    }
     this.log(`Indicators synced (${applied} items)`);
   }
 
@@ -72,7 +93,7 @@ export class ExplorerManager {
    * `view.fileItems`：上万条目时那是一次 8ms 级的整表扫描，拖拽/滚动会明显发涩。
    */
   observeIndicatorSync(el: HTMLElement): void {
-    this.indicatorObserver?.disconnect();
+    if (this.indicatorObservers.has(el)) return;
 
     let scheduled = false;
     const replay = () => {
@@ -86,14 +107,14 @@ export class ExplorerManager {
 
     const observer = new MutationObserver(replay);
     observer.observe(el, { childList: true, subtree: true });
-    this.indicatorObserver = observer;
+    this.indicatorObservers.set(el, observer);
     this.observers.push(observer);
     this.log("Indicator sync observer attached");
   }
 
   /** 只处理 DOM 里当前存在的行；虚拟列表滚出视口的行不需要状态 */
   private syncVisibleIndicators(container: HTMLElement): void {
-    const view = this.getExplorerView();
+    const view = this.getExplorerViews().find((v) => v?.containerEl?.contains(container));
     if (!view?.fileItems) return;
 
     const settings = this.getSettings();
@@ -109,13 +130,7 @@ export class ExplorerManager {
   disconnectObservers(): void {
     this.observers.forEach((obs) => obs.disconnect());
     this.observers.length = 0;
-    this.indicatorObserver = null;
+    this.indicatorObservers.clear();
     this.log("Observers disconnected");
-  }
-
-  private disconnectObserver(observer: MutationObserver): void {
-    observer.disconnect();
-    const idx = this.observers.indexOf(observer);
-    if (idx !== -1) this.observers.splice(idx, 1);
   }
 }

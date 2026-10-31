@@ -38,6 +38,45 @@ const MENU = () =>
     })(),
   }));
 
+const SORT_OF = (folderPath) =>
+  window.app.plugins.plugins["sun-home"].settings.order.items[folderPath]?.sortOrder ?? null;
+
+const CUSTOM_OF = (folderPath) =>
+  window.app.plugins.plugins["sun-home"].settings.order.items[folderPath]?.customOrder ?? null;
+
+/** 某文件夹的直接子行显示顺序（只取该层，按 DOM 顺序） */
+const CHILD_ORDER = (folderPath) => {
+  const view = window.app.workspace.getLeavesOfType("kb-tree-view")[0]?.view;
+  if (!view) return [];
+  const prefix = folderPath + "/";
+  return [...view.containerEl.querySelectorAll(".kb-tree-body .tree-item-self[data-path]")]
+    .map((el) => el.dataset.path)
+    .filter((p) => p && p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
+    .map((p) => p.slice(prefix.length));
+};
+
+/** 库根空白点：最后一行下方的 padding 里 */
+const BLANK_POINT = () => {
+  const body = document.querySelector(".kb-tree-body");
+  if (!body) return null;
+  const cr = body.getBoundingClientRect();
+  const rows = [...body.querySelectorAll(".tree-item-self[data-path]")]
+    .map((el) => el.getBoundingClientRect())
+    .filter((r) => r.height > 0 && r.bottom > cr.top && r.top < cr.bottom);
+  const y = rows.length ? Math.max(...rows.map((r) => r.bottom)) + 10 : cr.top + 20;
+  if (y > cr.bottom - 6) return { x: Math.round(cr.right - 4), y: Math.round(cr.top + cr.height / 2), w: 1, h: 1 };
+  return { x: Math.round(cr.x + 60), y: Math.round(y), w: 1, h: 1 };
+};
+
+const RENAME_STATE = () => {
+  const el = document.querySelector(".kb-tree-body .is-being-renamed");
+  return {
+    renaming: !!el,
+    text: el?.querySelector(".tree-item-inner")?.textContent ?? null,
+    editable: document.activeElement?.getAttribute?.("contenteditable") ?? null,
+  };
+};
+
 const NOTICES = () => [...document.querySelectorAll(".notice")].map((n) => n.textContent.trim());
 
 const MODAL = () => {
@@ -114,6 +153,35 @@ async function menuAndPick(ctx, pickText, label) {
   return { label, ok: true };
 }
 
+/** 打开某个文件夹的行右键菜单，再点开「排序方式」子菜单 */
+async function openRowSort(ctx, folderPath) {
+  const r = await ctx.page(ROWRECT, folderPath);
+  if (!r) return { ok: false, reason: "找不到文件夹行" };
+  const p = center(r);
+  await ctx.click(p.x, p.y, "right");
+  await sleep(420);
+  const items = await ctx.page(MENU);
+  const sortItem = items.find((i) => i.text === "排序方式");
+  if (!sortItem) return { ok: false, reason: "菜单里没有排序方式", items: items.map((i) => i.text) };
+  await ctx.click(center(sortItem.rect).x, center(sortItem.rect).y);
+  await sleep(650);
+  return { ok: true };
+}
+
+/** 库根空白右键 → 排序方式子菜单 */
+async function openRootSort(ctx) {
+  const bp = await ctx.page(BLANK_POINT);
+  if (!bp) return { ok: false, reason: "找不到库根空白" };
+  await ctx.click(bp.x, bp.y, "right");
+  await sleep(420);
+  const items = await ctx.page(MENU);
+  const sortItem = items.find((i) => i.text === "排序方式");
+  if (!sortItem) return { ok: false, reason: "空白菜单里没有排序方式", items: items.map((i) => i.text) };
+  await ctx.click(center(sortItem.rect).x, center(sortItem.rect).y);
+  await sleep(650);
+  return { ok: true };
+}
+
 export default async (ctx) => {
   const rep = {};
   const checks = [];
@@ -145,7 +213,11 @@ export default async (ctx) => {
   // ---------- 1. 工具条清单 ----------
   const bar = await ctx.page(TOOLBAR);
   rep.工具条 = bar.map((b) => `${b.i}:${b.label}${b.active ? "[激活]" : ""}`);
-  add("工具条 6 个按钮齐全（新建笔记/新建文件夹/排序/自动定位/折叠全部/刷新）", bar.length === 6, rep.工具条);
+  add(
+    "工具条 5 个按钮齐全（新建笔记/新建文件夹/自动定位/折叠全部/刷新），不含全库排序",
+    bar.length === 5 && !bar.some((b) => b.label.includes("排序")),
+    rep.工具条
+  );
 
   // ---------- 2. 单击折叠 / 展开文件夹 ----------
   const before = await ctx.page(ROWS);
@@ -181,60 +253,89 @@ export default async (ctx) => {
     rows: allExpanded.rows.length,
   });
 
-  // ---------- 4. 排序菜单：写的是与原生树共用的 order.items[库].sortOrder ----------
-  const sortIdx = bar.findIndex((b) => b.label.includes("排序"));
+  // ---------- 4. 排序方式：按文件夹右键，只影响该文件夹 ----------
   const 期望值 = {
     "名称 A → Z": "byNameAsc",
     "名称 Z → A": "byNameDesc",
+    "创建时间 新 → 旧": "byCreatedTimeDesc",
+    "创建时间 旧 → 新": "byCreatedTimeAsc",
     "修改时间 新 → 旧": "byModifiedTimeDesc",
     "修改时间 旧 → 新": "byModifiedTimeAsc",
     "自定义顺序": "custom",
   };
-  const 顶层顺序 = () =>
-    ctx.page(() => {
-      const view = window.app.workspace.getLeavesOfType("kb-tree-view")[0].view;
-      return [...view.containerEl.querySelectorAll(".kb-tree-body > .tree-item")].map((el) => {
-        const path = el.querySelector(":scope > .tree-item-self")?.dataset?.path ?? "";
-        return path.split("/").pop();
-      });
-    });
   const sortProbe = [];
-  let 切自定义前后 = null;
   for (const [want, key] of Object.entries(期望值)) {
-    const 切之前 = want === "自定义顺序" ? await 顶层顺序() : null;
-    await clickToolbar(ctx, sortIdx, "打开排序菜单");
+    const opened = await openRowSort(ctx, subA);
+    if (!opened.ok) {
+      sortProbe.push({ want, 打开失败: opened });
+      continue;
+    }
     const items = await ctx.page(MENU);
     if (sortProbe.length === 0) rep.排序菜单项 = items.map((i) => i.text);
     const hit = items.find((i) => i.text.startsWith(want));
-    sortProbe.push({ want, 在菜单里: !!hit });
+    const probe = { want, 在菜单里: !!hit };
+    sortProbe.push(probe);
     if (hit) {
-      const p = center(hit.rect);
-      await ctx.click(p.x, p.y);
-      await sleep(320);
-      const after = await ctx.page(ROWS);
-      sortProbe[sortProbe.length - 1].sortOrder = after.sortOrder;
-      sortProbe[sortProbe.length - 1].首行 = after.rows[0]?.path?.split("/").pop() ?? null;
-      sortProbe[sortProbe.length - 1].对上了 = after.sortOrder === key;
-      if (want === "自定义顺序") 切自定义前后 = { 切之前, 切之后: await 顶层顺序(), 固化: after.customOrder };
+      await ctx.click(center(hit.rect).x, center(hit.rect).y);
+      await sleep(500);
+      probe.sortOrder = await ctx.page(SORT_OF, subA);
+      probe.对上了 = probe.sortOrder === key;
     }
   }
   rep.排序切换 = sortProbe;
   add(
-    "排序菜单 5 种都能点，且每次都写进共享的 order.items[库].sortOrder",
-    sortProbe.every((s) => s.在菜单里) && sortProbe.every((s) => s.对上了),
+    "文件夹右键排序菜单 7 种都能点，且写入该文件夹的 sortOrder",
+    sortProbe.length === 7 && sortProbe.every((s) => s.在菜单里 && s.对上了),
     sortProbe
   );
+
+  // 显式「将当前顺序保存为自定义顺序」：固化的就是当前屏幕顺序
+  const descOpened = await openRowSort(ctx, subA);
+  if (descOpened.ok) await menuAndPick(ctx, "名称 Z → A", "文件夹 A 切到名称 Z → A");
+  const beforeSave = await ctx.page(CHILD_ORDER, subA);
+  const saveOpened = await openRowSort(ctx, subA);
+  let savePicked = { ok: false };
+  if (saveOpened.ok) {
+    savePicked = await menuAndPick(ctx, "将当前顺序保存为自定义顺序", "点保存为自定义顺序");
+    await sleep(400);
+    if (savePicked.ok) {
+      const cm = await ctx.page(MODAL);
+      const okBtn = cm?.buttons?.find((b) => b.text === "确定");
+      if (okBtn) {
+        await ctx.click(center(okBtn.rect).x, center(okBtn.rect).y);
+        await sleep(650);
+      }
+    }
+  }
+  const savedCustom = await ctx.page(CUSTOM_OF, subA);
+  const savedOrder = await ctx.page(CHILD_ORDER, subA);
+  const savedSort = await ctx.page(SORT_OF, subA);
   add(
-    "切到「自定义顺序」时先固化当前显示顺序（屏幕不跳、顺序写进 customOrder）",
-    !!切自定义前后 &&
-      JSON.stringify(切自定义前后.切之前) === JSON.stringify(切自定义前后.切之后) &&
-      JSON.stringify(切自定义前后.固化) === JSON.stringify(切自定义前后.切之后),
-    切自定义前后
+    "「将当前顺序保存为自定义顺序」固化当前屏幕顺序",
+    savePicked.ok &&
+      savedSort === "custom" &&
+      JSON.stringify(savedCustom) === JSON.stringify(beforeSave) &&
+      JSON.stringify(savedOrder) === JSON.stringify(beforeSave),
+    { beforeSave, savedSort, savedCustom, savedOrder }
   );
 
-  // 回到名称升序
-  await clickToolbar(ctx, sortIdx, "打开排序菜单");
-  await menuAndPick(ctx, "名称 A → Z", "恢复名称 A → Z");
+  // 库根空白右键的排序只改库根
+  const rootBefore = await ctx.page(SORT_OF, SANDBOX);
+  const rootOpened = await openRootSort(ctx);
+  add("库根空白右键有排序方式", rootOpened.ok, rootOpened);
+  if (rootOpened.ok) await menuAndPick(ctx, "名称 Z → A", "库根切到名称 Z → A");
+  const rootAfter = await ctx.page(SORT_OF, SANDBOX);
+  add(
+    "库根空白右键排序只改库根",
+    rootAfter === "byNameDesc" && rootAfter !== rootBefore,
+    { rootBefore, rootAfter }
+  );
+
+  // 还原：文件夹 A 和库根都回名称升序
+  const resetA = await openRowSort(ctx, subA);
+  if (resetA.ok) await menuAndPick(ctx, "名称 A → Z", "文件夹 A 还原名称升序");
+  const resetRoot = await openRootSort(ctx);
+  if (resetRoot.ok) await menuAndPick(ctx, "名称 A → Z", "库根还原名称升序");
   const backToName = await ctx.page(ROWS);
   rep.sortOrder最终 = backToName.sortOrder;
 
@@ -274,6 +375,10 @@ export default async (ctx) => {
   await clickToolbar(ctx, autoIdx, "重新打开自动定位");
   const autoOn = await ctx.page(TOOLBAR);
   add("自动定位可再开启且按钮高亮", autoOn[autoIdx].active === true);
+
+  // 工具条新建位置跟原生一致：活动笔记所在文件夹；先把活动笔记切到库根
+  await ctx.page(OPEN_VIA_LINK, `${SANDBOX}/说明.md`);
+  await sleep(600);
 
   // ---------- 6. 新建笔记：应与原生文件树一致，点一下就建好（不弹名字框）----------
   const newNoteIdx = bar.findIndex((b) => b.label === "新建笔记");
@@ -323,13 +428,11 @@ export default async (ctx) => {
   let r = await ctx.page(ROWRECT, notePath);
   if (!r) {
     // 若被自动定位/重绘影响，重进一次库
-    await ctx.page(
-      (p) => {
-        window.__probe.view.showKb(p);
-      },
-      SANDBOX
-    );
-    await sleep(300);
+    await ctx.page((p) => {
+      const plugin = window.app.plugins.plugins["sun-home"];
+      return plugin.openKbTree({ path: p, name: p.split("/").pop(), docCount: 0, groupId: null });
+    }, SANDBOX);
+    await sleep(500);
     r = await ctx.page(ROWRECT, notePath);
   }
   if (r) {
@@ -339,9 +442,19 @@ export default async (ctx) => {
     await sleep(400);
     const items = await ctx.page(MENU);
     rep.文件右键菜单 = items.map((i) => i.text);
-    const need = ["打开", "在新标签页打开", "重命名", "删除", "在系统资源管理器中显示", "复制路径"];
+    const need = [
+      "在新标签页中打开",
+      "创建副本",
+      "将文件移动到…",
+      "复制路径",
+      "在系统资源管理器中显示",
+      "置顶",
+      "隐藏",
+      "重命名",
+      "删除",
+    ];
     add(
-      "文件右键菜单项齐全",
+      "文件右键菜单按原生分组补齐核心项",
       need.every((n) => items.some((i) => i.text === n)),
       rep.文件右键菜单
     );
@@ -350,19 +463,18 @@ export default async (ctx) => {
     const notices = await ctx.page(NOTICES);
     add("菜单项「复制路径」有反馈 Notice", notices.some((t) => t.includes("复制")), notices);
 
-    // 重命名：改名后再改回，验证 promptText 流
+    // 重命名：行内 contenteditable，Enter 提交
     await ctx.click(p.x, p.y, "right");
     await sleep(380);
-    await menuAndPick(ctx, "重命名", "点重命名");
-    const renModal = await ctx.page(MODAL);
-    rep.重命名弹窗 = renModal && { title: renModal.title, desc: renModal.desc };
-    if (renModal?.inputRect) {
-      await ctx.click(center(renModal.inputRect).x, center(renModal.inputRect).y);
-      await sleep(100);
+    const picked = await menuAndPick(ctx, "重命名", "点重命名");
+    await sleep(450);
+    const renState = await ctx.page(RENAME_STATE);
+    add("右键重命名进入行内编辑", picked.ok && renState.renaming && renState.editable === "true", renState);
+    if (renState.renaming) {
       await ctx.clearAndType(renamedTo);
       await sleep(100);
       await ctx.key("Enter", "Enter", 13);
-      await sleep(700);
+      await sleep(800);
     }
     const renamed = await ctx.page(EXISTS, renamedPath);
     const oldStill = await ctx.page(EXISTS, notePath);
@@ -373,16 +485,17 @@ export default async (ctx) => {
       目录清单: await ctx.page(VAULT_LIST, `${SANDBOX}/`),
     });
 
-    // 删除：走确认弹窗，点「确定」
+    // 删除：走原生确认框，点破坏性按钮
     let r2 = await ctx.page(ROWRECT, renamedPath);
     if (r2) {
       const p2 = center(r2);
       await ctx.click(p2.x, p2.y, "right");
       await sleep(380);
       await menuAndPick(ctx, "删除", "点删除");
+      await sleep(500);
       const cm = await ctx.page(MODAL);
       rep.删除确认弹窗 = cm && { title: cm.title, buttons: cm.buttons.map((b) => b.text) };
-      const okBtn = cm?.buttons?.find((b) => b.text === "确定");
+      const okBtn = cm?.buttons?.find((b) => /删除|确定/.test(b.text));
       if (okBtn) {
         await ctx.click(center(okBtn.rect).x, center(okBtn.rect).y);
         await sleep(700);
@@ -400,19 +513,25 @@ export default async (ctx) => {
     await sleep(400);
     const items = await ctx.page(MENU);
     rep.文件夹右键菜单 = items.map((i) => i.text);
-    const need = ["新建笔记", "新建文件夹", "重命名", "删除", "在系统资源管理器中显示", "复制路径", "折叠此文件夹"];
+    const need = [
+      "新建笔记",
+      "新建文件夹",
+      "创建副本",
+      "将文件夹移动到…",
+      "在文件夹中查找",
+      "排序方式",
+      "置顶",
+      "隐藏",
+      "重命名",
+      "删除",
+      "在系统资源管理器中显示",
+      "复制路径",
+    ];
     add(
-      "文件夹右键菜单项齐全",
-      need.every((n) => items.some((i) => i.text === n || i.text.startsWith("展开此文件夹"))),
+      "文件夹右键菜单按原生分组补齐",
+      need.every((n) => items.some((i) => i.text === n)),
       rep.文件夹右键菜单
     );
-    // 折叠/展开项
-    const foldItem = items.find((i) => i.text === "折叠此文件夹" || i.text === "展开此文件夹");
-    await menuAndPick(ctx, foldItem ? foldItem.text : "不存在", "点折叠/展开项");
-    const afterFold = await ctx.page(ROWS);
-    add("文件夹菜单的折叠/展开项可用", afterFold.collapsed.includes(`${SANDBOX}/子文件夹B`) || !afterFold.collapsed.includes(`${SANDBOX}/子文件夹B`), {
-      collapsed: afterFold.collapsed,
-    });
     await ctx.page(() => document.body.click()); // 关菜单
     await sleep(150);
   } else add("文件夹右键菜单：找不到 子文件夹B", false);

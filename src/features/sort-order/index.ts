@@ -34,7 +34,7 @@ export class SortOrderFeature implements Feature {
     );
 
     // ⚠️ 见文件头约束 1：必须此刻登记
-    this.engine.registerVaultEvents((ref) => ctx.registerEvent(ref));
+    this.engine.registerVaultEvents((ref) => ctx.registerEvent(ref), () => ctx.refreshViews());
     // 隐藏规则此刻就要编译好：布局恢复时卡片页会在 onLayoutReady 之前就渲染，
     // 那会儿若还没 sync，glob 规则读不到，被隐藏的文件夹会混进知识库列表。
     this.engine.syncRuntimeSettings();

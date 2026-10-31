@@ -113,12 +113,12 @@ export class KbHomeView extends ItemView {
     const missing: KnowledgeGroup[] = [];
     for (const g of settings.groups) {
       // 真实分组文件夹被外部删掉/移走时不渲染空壳，交给设置页处理
-      if (g.path && !getFolder(this.app, g.path)) {
+      if (!getFolder(this.app, g.path)) {
         missing.push(g);
         continue;
       }
       // 分组文件夹本身被隐藏时整组不出现（与根目录知识库的隐藏语义一致）
-      if (g.path && this.plugin.isHiddenForList(g.path)) continue;
+      if (this.plugin.isHiddenForList(g.path)) continue;
       const items = all.filter((kb) => kb.groupId === g.id);
       items.forEach((kb) => grouped.add(kb.path));
       this.renderGroup(body, g, items);
@@ -130,7 +130,7 @@ export class KbHomeView extends ItemView {
     if (ungrouped.length > 0 || settings.groups.length > 0) {
       this.renderGroup(
         body,
-        { id: "__ungrouped__", name: settings.groups.length ? "未分组" : "", order: [] },
+        { id: "__ungrouped__", name: settings.groups.length ? "未分组" : "", path: "", order: [] },
         ungrouped
       );
     }
@@ -156,7 +156,7 @@ export class KbHomeView extends ItemView {
 
     const sec = parent.createDiv({ cls: "kb-group" });
     sec.dataset.groupId = group.id;
-    if (group.path) sec.dataset.groupPath = group.path;
+    sec.dataset.groupPath = group.path;
 
     // 整个分组区域都是放置目标：拖卡片到分组任意位置即可移入该分组。
     // 卡片自身的 drop 会 stopPropagation，所以这里只在「非卡片区域」生效。
@@ -306,7 +306,6 @@ export class KbHomeView extends ItemView {
 
   /** 把某个知识库移入目标分组（groupId 为 null 表示移出到未分组） */
   private async moveToGroup(kbPath: string, groupId: string | null): Promise<void> {
-    // 新版分组会真实移动文件夹；旧虚拟分组只改归属，插件内部已分流
     await this.plugin.moveKbToGroup(kbPath, groupId);
     this.render();
   }
@@ -546,15 +545,11 @@ export class KbHomeView extends ItemView {
           const target = groupId ? s.groups.find((g) => g.id === groupId) : null;
           if (groupId && !target) throw new Error("分组不存在");
           let parentPath = "/";
-          if (target?.path) {
+          if (target) {
             if (!getFolder(this.app, target.path)) throw new Error("分组文件夹不存在");
             parentPath = target.path;
           }
-          const path = await createKnowledgeBase(this.app, name.trim(), parentPath);
-          // 旧虚拟分组没有真实父目录，只能手动记成员；其余交给目录对齐
-          if (target && !target.path && !target.order.includes(path)) {
-            target.order.push(path);
-          }
+          await createKnowledgeBase(this.app, name.trim(), parentPath);
           reconcileGroupOrders(this.app, s);
           await this.plugin.saveSettingsNow();
           this.render();
@@ -568,9 +563,7 @@ export class KbHomeView extends ItemView {
   private promptNewGroup(): void {
     this.plugin.showInputModal(
       "新建分组",
-      this.plugin.hasLegacyGroupDefs()
-        ? "旧分组还没迁移；本次会先建虚拟分组，下次迁移时一起落成文件夹"
-        : "将创建一个真实文件夹作为分组；组内知识库是它的直接子文件夹",
+      "将创建一个真实文件夹作为分组；组内知识库是它的直接子文件夹",
       "",
       async (name) => {
         if (!name?.trim()) return;
@@ -597,12 +590,9 @@ export class KbHomeView extends ItemView {
   }
 
   private async deleteGroup(group: KnowledgeGroup): Promise<void> {
-    const isReal = !!group.path;
     this.plugin.confirmModal(
       "删除分组",
-      isReal
-        ? `确定删除分组「${group.name}」吗？组内 ${group.order.length} 个知识库会移回 vault 根目录（变成未分组），然后删除空的分组文件夹；不会删除任何笔记。`
-        : `确定删除分组「${group.name}」吗？组内 ${group.order.length} 个知识库会回到未分组，文件本身不受影响。`,
+      `确定删除分组「${group.name}」吗？组内 ${group.order.length} 个知识库会移回 vault 根目录（变成未分组），然后删除空的分组文件夹；不会删除任何笔记。`,
       async () => {
         const result = await this.plugin.dissolveGroup(group);
         if (result.errors.length > 0) {

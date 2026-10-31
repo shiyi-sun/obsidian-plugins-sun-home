@@ -21,7 +21,7 @@ Groups are real folders. Notes remain ordinary Markdown files; the plugin does n
 | --- | --- |
 | Knowledge base | A direct subfolder of a group folder, or a root-level folder that is not registered as a group. |
 | Group | A real folder in the vault root. Creating, renaming, moving, or deleting a group operates on real folders. |
-| Tree | The native-style file tree for one knowledge base. |
+| Tree | The file tree for one knowledge base. It uses the same layout, menus, shortcuts, and sort data as Obsidian's file explorer, limited to the selected knowledge base. |
 
 `data.json` stores group registrations, ordering, and display overrides only. File contents stay in the vault.
 
@@ -41,11 +41,21 @@ Groups are real folders. Notes remain ordinary Markdown files; the plugin does n
 - Rename or delete a group by renaming or deleting the real folder. Deleting a group first moves its contents back to the vault root; notes are never deleted.
 - Only direct subfolders of a group become knowledge-base cards. Files placed directly inside a group stay in the native file tree and do not become cards.
 
+### Tree that behaves like the native explorer
+
+- Same rows, indentation, row spacing, themes, active/selection states, and drag indicators as Obsidian's file explorer.
+- Same mouse behavior: click opens, Ctrl/Cmd-click opens in a new tab, middle-click opens in a new tab, Alt-click toggles selection, Shift-click selects a range.
+- Same context menus (file, folder, multi-selection, empty tree area), with sort, pin, hide, copy path, reveal in system file manager, duplicate, move within the knowledge base, rename, and delete.
+- Sorting is per folder, exactly like the native explorer: custom, name, created time, or modified time.
+- Inline rename with F2; keyboard navigation with arrows, Home/End, Enter, and Delete.
+- Shows Markdown notes, attachments, and other non-Markdown files. Attachments display their file extension as a tag.
+- The only difference from the native explorer is scope: this tree shows one knowledge base, so cross-knowledge-base moves are not offered.
+
 ### Drag and drop
 
 - **Cards:** drag to reorder. A vertical accent line shows the insertion point: drop on the left half of a card to insert before it, or on the right half to insert after it.
 - **Groups:** drag a group header to reorder groups; a line shows before/after.
-- **Tree:** reorder siblings, drop into a folder, drop on an item's top/bottom edge to move into that folder at that position, or drop on the root title to move back to the knowledge-base root.
+- **Tree:** reorder siblings, drop into a folder, drop on an item's top/bottom edge to move into that folder at that position, or drop on empty space in the tree to move back to the knowledge-base root.
 - Folder rows show an insertion line near the top/bottom 30% and a clear "move into" highlight in the middle 40%.
 - Dropping a card back into its own group is a no-op and does not highlight the whole group.
 - Hovering a collapsed folder for about one second expands it during a drag.
@@ -95,7 +105,7 @@ After a manual copy, enable the plugin once in Community plugins. Obsidian then 
 
 Requires Obsidian **1.7.2** or newer. The plugin UI is currently in Chinese; the command names below are shown as they appear in Obsidian.
 
-Configurations from the old `kb-home` plugin id or from virtual groups are migrated on first load. If you deferred the group migration, the command palette still has **Migrate legacy groups to real folders**.
+Settings are read from `.obsidian/plugins/sun-home/data.json` only. Settings from the old `kb-home` plugin id and old virtual-group definitions are not imported.
 
 ## Usage
 
@@ -103,8 +113,8 @@ Configurations from the old `kb-home` plugin id or from virtual groups are migra
 2. Create groups and knowledge bases with the toolbar buttons, or register an existing root folder as a group in Settings.
 3. Drag cards to reorder them or move them between groups.
 4. Click a card to open that knowledge base's tree; use "← All knowledge bases" to return.
-5. In the tree, use the toolbar to create notes or folders, change the sort mode for the whole knowledge base, collapse/expand all, or reveal the active note.
-6. Right-click items for open/new tab, rename, delete, copy path, reveal in system file manager, pin, hide, and sort actions.
+5. In the tree, use the toolbar to create notes or folders, reveal the active note, collapse/expand all, or refresh. Sort a folder from its right-click menu.
+6. Right-click items for open/new tab, rename, delete, copy path, reveal in system file manager, pin, hide, and per-folder sort actions.
 
 ## Settings
 
@@ -122,7 +132,6 @@ Open the command palette and search for `sun-kb-home`:
 - `打开知识库列表` — Open the knowledge-base list
 - `打开当前笔记所在知识库的目录` — Open the tree for the active note's knowledge base
 - `显示 / 隐藏被隐藏的文件` — Toggle hidden files
-- `迁移旧分组到真实文件夹` — Migrate legacy groups (only needed for very old configurations)
 
 Two ribbon icons mirror the first two commands.
 
@@ -134,6 +143,8 @@ Two ribbon icons mirror the first two commands.
 - Renaming a group or knowledge base does not rewrite old paths in glob hide rules; update the rules manually.
 - Moving or deleting groups operates on real folders. Obsidian updates internal links, but external tools, absolute paths, or references created outside Obsidian may need manual fixes.
 - Callouts: in Reading view, block elements separated from the rest of a callout by a blank line may fall outside the box. Live Preview does not have this issue. Inline Markdown in callout titles renders in Live Preview but is plain text in Reading view.
+- The single-knowledge-base tree does not fire Obsidian's `file-menu` / `files-menu` events, so context-menu items injected by other plugins appear only in the native explorer. Built-in actions are replicated directly.
+- In the single-knowledge-base tree, **Copy path** copies immediately; the native explorer opens a submenu first.
 - The Reading-view callout renderer rewrites Obsidian-rendered DOM; other plugins that also rewrite the preview DOM may interact with it.
 
 ## Build from source
@@ -158,5 +169,5 @@ The sort/pin/hide engine in `src/core/` is adapted from [Flexplorer](https://git
 ## Compatibility
 
 - `minAppVersion`: 1.7.2
-- Tested with Obsidian 1.14.4.
-- The live CDP regression suite covers card/tree/native drag and drop, group operations, settings, migration, persistence, callouts, and cleanup (13/13 passing at release 1.6.14).
+- Tested with Obsidian 1.14.4 and 1.14.5.
+- The live CDP regression suite covers card/tree/native drag and drop, native-parity interactions and menus, 10k-item virtualization, group operations, settings, persistence, callouts, and cleanup (15/15 passing at release 1.6.17).

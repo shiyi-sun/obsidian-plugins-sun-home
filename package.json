@@ -1,6 +1,6 @@
 {
   "name": "obsidian-sun-home",
-  "version": "1.6.14",
+  "version": "1.6.17",
   "description": "把 Obsidian 首页变成知识库卡片墙，以真实文件夹分组，点击进入知识库的树状目录，并渲染 ::: 提示块",
   "main": "main.js",
   "scripts": {

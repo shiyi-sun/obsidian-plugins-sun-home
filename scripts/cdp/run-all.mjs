@@ -18,8 +18,10 @@ const cases = [
   "t5-cardwall.mjs", // 卡片墙拖拽：同级重排 + 拖进折叠分组放置区
   "t11-native2.mjs", // 原生文件浏览器的自定义顺序 / 排序菜单 / 置顶
   "t16-native-dnd.mjs", // 原生树拖拽：同级换位 / 名称序切自定义 / 面板重建 / 自投
+  "t17-tree-parity-dnd.mjs", // 两棵树拖拽落点/顺序/指示线对比
+  "t18-tree-parity-interactions.mjs", // 点击、选中、菜单、键盘、重命名、附件
+  "t19-tree-perf.mjs", // 10k 单库虚拟化与拖拽性能（KB_PERF_COUNT 可缩短）
   "t8-persistence.mjs", // 落盘、重启恢复、ribbon 与命令
-  "t14-migration.mjs", // 旧虚拟分组 → 真实文件夹迁移 + 路径状态迁移
   "t15-group-order.mjs", // 分组标题拖拽调整分组之间的显示顺序
   "t13-admonition.mjs", // 提示块渲染 + 增量重算探针 + 设置页开关
   "t12-cleanup.mjs", // 删除沙箱库并清掉测试写入的设置

@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => KbHomePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian15 = require("obsidian");
+var import_obsidian20 = require("obsidian");
 
 // src/view-home.ts
 var import_obsidian4 = require("obsidian");
@@ -620,9 +620,6 @@ var DEFAULT_SETTINGS = {
   },
   admonition: { ...DEFAULT_ADMONITION }
 };
-function hasLegacyGroups(settings) {
-  return settings.groups.some((g) => !g.path);
-}
 function parentPathOf(path) {
   const i = path.lastIndexOf("/");
   return i === -1 ? "/" : path.slice(0, i) || "/";
@@ -671,9 +668,7 @@ function uniquePath(app, parentPath, name, isFile = false) {
 }
 function scanKnowledgeBases(app, settings, isHidden = () => false) {
   const root = app.vault.getRoot();
-  const groupPaths = new Set(
-    settings.groups.map((g) => g.path).filter((p) => !!p)
-  );
+  const groupPaths = new Set(settings.groups.map((g) => g.path));
   const list = [];
   const pushKb = (folder, groupId) => {
     if (isHiddenFolder(folder.name) || isHidden(folder.path))
@@ -688,8 +683,6 @@ function scanKnowledgeBases(app, settings, isHidden = () => false) {
     });
   };
   for (const group of settings.groups) {
-    if (!group.path)
-      continue;
     const groupFolder = getFolder(app, group.path);
     if (!groupFolder || isHiddenFolder(groupFolder.name) || isHidden(groupFolder.path))
       continue;
@@ -724,14 +717,8 @@ function scanKnowledgeBases(app, settings, isHidden = () => false) {
 function findGroupOf(settings, path) {
   const parent = parentPathOf(path);
   for (const g of settings.groups) {
-    if (g.path && g.path === parent)
+    if (g.path === parent)
       return g.id;
-  }
-  if (parent === "/") {
-    for (const g of settings.groups) {
-      if (!g.path && g.order.includes(path))
-        return g.id;
-    }
   }
   return null;
 }
@@ -773,12 +760,8 @@ async function createGroupFolder(app, name) {
 }
 function reconcileGroupOrders(app, settings) {
   let changed = false;
-  const groupPaths = new Set(
-    settings.groups.map((g) => g.path).filter((p) => !!p)
-  );
+  const groupPaths = new Set(settings.groups.map((g) => g.path));
   for (const group of settings.groups) {
-    if (!group.path)
-      continue;
     const folder = getFolder(app, group.path);
     if (!folder)
       continue;
@@ -798,15 +781,8 @@ function reconcileGroupOrders(app, settings) {
       changed = true;
     }
   }
-  const legacyMembers = /* @__PURE__ */ new Set();
-  for (const group of settings.groups) {
-    if (group.path)
-      continue;
-    for (const p of group.order)
-      legacyMembers.add(p);
-  }
   const rootKbs = app.vault.getRoot().children.filter(
-    (c) => c instanceof import_obsidian3.TFolder && !groupPaths.has(c.path) && !legacyMembers.has(c.path) && !isHiddenFolder(c.name)
+    (c) => c instanceof import_obsidian3.TFolder && !groupPaths.has(c.path) && !isHiddenFolder(c.name)
   ).map((c) => c.path).sort((a, b) => baseNameOf(a).localeCompare(baseNameOf(b), "zh"));
   const nextUngrouped = settings.ungroupedOrder.filter((p) => rootKbs.includes(p));
   for (const p of rootKbs)
@@ -838,8 +814,6 @@ function migrateSettingsPaths(settings, oldPath, newPath) {
   }
   settings.overrides = overrides;
   for (const group of settings.groups) {
-    if (!group.path)
-      continue;
     const next = remapPath(group.path, oldPath, newPath);
     if (next !== group.path) {
       group.path = next;
@@ -893,64 +867,10 @@ function migrateSettingsPaths(settings, oldPath, newPath) {
   }
   return changed;
 }
-function planLegacyMigration(app, settings) {
-  const rootPath = app.vault.getRoot().path;
-  return settings.groups.filter((g) => !g.path).map((group) => ({
-    group,
-    members: group.order.map((p) => app.vault.getAbstractFileByPath(p)).filter(
-      (f) => {
-        var _a, _b;
-        return f instanceof import_obsidian3.TFolder && ((_b = (_a = f.parent) == null ? void 0 : _a.path) != null ? _b : "") === rootPath;
-      }
-    )
-  }));
-}
-async function migrateLegacyGroups(app, settings, onProgress) {
-  const result = { moved: 0, groups: [], errors: [] };
-  const pending = settings.groups.filter((g) => !g.path);
-  for (const group of pending) {
-    const members = group.order.map((p) => app.vault.getAbstractFileByPath(p)).filter(
-      (f) => {
-        var _a, _b;
-        return f instanceof import_obsidian3.TFolder && ((_b = (_a = f.parent) == null ? void 0 : _a.path) != null ? _b : "") === app.vault.getRoot().path;
-      }
-    );
-    const desired = safeFolderName(group.name);
-    const folderPath = uniquePath(app, "/", desired);
-    try {
-      await app.vault.createFolder(folderPath);
-    } catch (err) {
-      result.errors.push(`\u521B\u5EFA\u5206\u7EC4\u6587\u4EF6\u5939\u300C${desired}\u300D\u5931\u8D25\uFF1A${String(err)}`);
-      continue;
-    }
-    const renamed = baseNameOf(folderPath) !== group.name;
-    group.path = folderPath;
-    group.name = baseNameOf(folderPath);
-    result.groups.push({ name: group.name, path: folderPath, renamed });
-    const movedPaths = [];
-    for (const member of members) {
-      const oldPath = member.path;
-      onProgress == null ? void 0 : onProgress(`\u79FB\u52A8\u300C${member.name}\u300D\u2192\u300C${group.name}\u300D`);
-      const target = uniquePath(app, folderPath, member.name);
-      try {
-        await app.fileManager.renameFile(member, target);
-      } catch (err) {
-        result.errors.push(`\u79FB\u52A8\u300C${oldPath}\u300D\u5931\u8D25\uFF1A${String(err)}`);
-        continue;
-      }
-      migrateSettingsPaths(settings, oldPath, target);
-      movedPaths.push(target);
-      result.moved++;
-    }
-    group.order = movedPaths;
-  }
-  reconcileGroupOrders(app, settings);
-  return result;
-}
 async function dissolveGroup(app, settings, group) {
   var _a, _b;
   const result = { moved: 0, errors: [], folderDeleted: false };
-  const folder = group.path ? getFolder(app, group.path) : null;
+  const folder = getFolder(app, group.path);
   if (folder) {
     for (const child of [...folder.children]) {
       const oldPath = child.path;
@@ -1073,11 +993,11 @@ var KbHomeView = class extends import_obsidian4.ItemView {
     const grouped = /* @__PURE__ */ new Set();
     const missing = [];
     for (const g of settings.groups) {
-      if (g.path && !getFolder(this.app, g.path)) {
+      if (!getFolder(this.app, g.path)) {
         missing.push(g);
         continue;
       }
-      if (g.path && this.plugin.isHiddenForList(g.path))
+      if (this.plugin.isHiddenForList(g.path))
         continue;
       const items = all.filter((kb) => kb.groupId === g.id);
       items.forEach((kb) => grouped.add(kb.path));
@@ -1087,7 +1007,7 @@ var KbHomeView = class extends import_obsidian4.ItemView {
     if (ungrouped.length > 0 || settings.groups.length > 0) {
       this.renderGroup(
         body,
-        { id: "__ungrouped__", name: settings.groups.length ? "\u672A\u5206\u7EC4" : "", order: [] },
+        { id: "__ungrouped__", name: settings.groups.length ? "\u672A\u5206\u7EC4" : "", path: "", order: [] },
         ungrouped
       );
     }
@@ -1109,8 +1029,7 @@ var KbHomeView = class extends import_obsidian4.ItemView {
     const isCollapsed = this.collapsed.has(group.id);
     const sec = parent.createDiv({ cls: "kb-group" });
     sec.dataset.groupId = group.id;
-    if (group.path)
-      sec.dataset.groupPath = group.path;
+    sec.dataset.groupPath = group.path;
     this.attachGroupDrop(sec, group);
     if (group.name) {
       const header = sec.createDiv({ cls: "kb-group-header" });
@@ -1441,15 +1360,12 @@ var KbHomeView = class extends import_obsidian4.ItemView {
           if (groupId && !target)
             throw new Error("\u5206\u7EC4\u4E0D\u5B58\u5728");
           let parentPath = "/";
-          if (target == null ? void 0 : target.path) {
+          if (target) {
             if (!getFolder(this.app, target.path))
               throw new Error("\u5206\u7EC4\u6587\u4EF6\u5939\u4E0D\u5B58\u5728");
             parentPath = target.path;
           }
-          const path = await createKnowledgeBase(this.app, name.trim(), parentPath);
-          if (target && !target.path && !target.order.includes(path)) {
-            target.order.push(path);
-          }
+          await createKnowledgeBase(this.app, name.trim(), parentPath);
           reconcileGroupOrders(this.app, s);
           await this.plugin.saveSettingsNow();
           this.render();
@@ -1462,7 +1378,7 @@ var KbHomeView = class extends import_obsidian4.ItemView {
   promptNewGroup() {
     this.plugin.showInputModal(
       "\u65B0\u5EFA\u5206\u7EC4",
-      this.plugin.hasLegacyGroupDefs() ? "\u65E7\u5206\u7EC4\u8FD8\u6CA1\u8FC1\u79FB\uFF1B\u672C\u6B21\u4F1A\u5148\u5EFA\u865A\u62DF\u5206\u7EC4\uFF0C\u4E0B\u6B21\u8FC1\u79FB\u65F6\u4E00\u8D77\u843D\u6210\u6587\u4EF6\u5939" : "\u5C06\u521B\u5EFA\u4E00\u4E2A\u771F\u5B9E\u6587\u4EF6\u5939\u4F5C\u4E3A\u5206\u7EC4\uFF1B\u7EC4\u5185\u77E5\u8BC6\u5E93\u662F\u5B83\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939",
+      "\u5C06\u521B\u5EFA\u4E00\u4E2A\u771F\u5B9E\u6587\u4EF6\u5939\u4F5C\u4E3A\u5206\u7EC4\uFF1B\u7EC4\u5185\u77E5\u8BC6\u5E93\u662F\u5B83\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939",
       "",
       async (name) => {
         if (!(name == null ? void 0 : name.trim()))
@@ -1489,10 +1405,9 @@ var KbHomeView = class extends import_obsidian4.ItemView {
     });
   }
   async deleteGroup(group) {
-    const isReal = !!group.path;
     this.plugin.confirmModal(
       "\u5220\u9664\u5206\u7EC4",
-      isReal ? `\u786E\u5B9A\u5220\u9664\u5206\u7EC4\u300C${group.name}\u300D\u5417\uFF1F\u7EC4\u5185 ${group.order.length} \u4E2A\u77E5\u8BC6\u5E93\u4F1A\u79FB\u56DE vault \u6839\u76EE\u5F55\uFF08\u53D8\u6210\u672A\u5206\u7EC4\uFF09\uFF0C\u7136\u540E\u5220\u9664\u7A7A\u7684\u5206\u7EC4\u6587\u4EF6\u5939\uFF1B\u4E0D\u4F1A\u5220\u9664\u4EFB\u4F55\u7B14\u8BB0\u3002` : `\u786E\u5B9A\u5220\u9664\u5206\u7EC4\u300C${group.name}\u300D\u5417\uFF1F\u7EC4\u5185 ${group.order.length} \u4E2A\u77E5\u8BC6\u5E93\u4F1A\u56DE\u5230\u672A\u5206\u7EC4\uFF0C\u6587\u4EF6\u672C\u8EAB\u4E0D\u53D7\u5F71\u54CD\u3002`,
+      `\u786E\u5B9A\u5220\u9664\u5206\u7EC4\u300C${group.name}\u300D\u5417\uFF1F\u7EC4\u5185 ${group.order.length} \u4E2A\u77E5\u8BC6\u5E93\u4F1A\u79FB\u56DE vault \u6839\u76EE\u5F55\uFF08\u53D8\u6210\u672A\u5206\u7EC4\uFF09\uFF0C\u7136\u540E\u5220\u9664\u7A7A\u7684\u5206\u7EC4\u6587\u4EF6\u5939\uFF1B\u4E0D\u4F1A\u5220\u9664\u4EFB\u4F55\u7B14\u8BB0\u3002`,
       async () => {
         const result = await this.plugin.dissolveGroup(group);
         if (result.errors.length > 0) {
@@ -1565,107 +1480,1531 @@ var KbHomeView = class extends import_obsidian4.ItemView {
 };
 
 // src/view-tree.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
-// src/core/menu.ts
+// src/tree/kb-surface.ts
 var import_obsidian5 = require("obsidian");
-var SORT_OPTIONS = [
-  ["\u81EA\u5B9A\u4E49\u987A\u5E8F", "custom"],
-  ["\u540D\u79F0 A \u2192 Z", "byNameAsc"],
-  ["\u540D\u79F0 Z \u2192 A", "byNameDesc"],
-  ["\u521B\u5EFA\u65F6\u95F4 \u65B0 \u2192 \u65E7", "byCreatedTimeDesc"],
-  ["\u521B\u5EFA\u65F6\u95F4 \u65E7 \u2192 \u65B0", "byCreatedTimeAsc"],
-  ["\u4FEE\u6539\u65F6\u95F4 \u65B0 \u2192 \u65E7", "byModifiedTimeDesc"],
-  ["\u4FEE\u6539\u65F6\u95F4 \u65E7 \u2192 \u65B0", "byModifiedTimeAsc"]
-];
-function populateFileMenu(menu, file, host) {
-  const fileSettings = host.ensureItemSettings(file);
-  if (file instanceof import_obsidian5.TFolder) {
-    const folderSettings = fileSettings;
-    menu.addItem((item) => {
-      var _a, _b;
-      item.setTitle("\u6392\u5E8F\u65B9\u5F0F").setIcon("sort-asc");
-      const submenu = (_b = (_a = item.setSubmenu) == null ? void 0 : _a.call(item)) != null ? _b : menu;
-      populateSortMenu(submenu, folderSettings.sortOrder, host, file.path, folderSettings);
-    });
+var blankDragImage = document.createElement("canvas");
+blankDragImage.width = 1;
+blankDragImage.height = 1;
+var KbTreeSurface = class {
+  constructor(host, app, orderManager, getFolderSettings) {
+    this.host = host;
+    this.app = app;
+    this.orderManager = orderManager;
+    this.getFolderSettings = getFolderSettings;
+    this.markedSibling = null;
+    this.markedFolder = null;
   }
-  menu.addItem(
-    (item) => item.setTitle(fileSettings.isPinned ? "\u53D6\u6D88\u7F6E\u9876" : "\u7F6E\u9876").setIcon(fileSettings.isPinned ? "pin-off" : "pin").onClick(() => {
-      fileSettings.isPinned = !fileSettings.isPinned;
-      if (fileSettings.isPinned)
-        host.orderManager.move(file.path, file.path);
-      void host.saveSettingsNow();
-      host.sortExplorer();
-      host.syncIndicators();
-    })
-  );
-  menu.addItem(
-    (item) => item.setTitle(fileSettings.isHidden ? "\u53D6\u6D88\u9690\u85CF" : "\u9690\u85CF").setIcon(fileSettings.isHidden ? "eye" : "eye-off").onClick(() => {
-      fileSettings.isHidden = !fileSettings.isHidden;
-      void host.saveSettingsNow();
-      host.syncIndicators();
-    })
-  );
-}
-function populateSortMenu(menu, currentSortOrder, host, folderPath, folderSettings) {
-  SORT_OPTIONS.forEach(([title, sortOrder]) => {
-    menu.addItem(
-      (item) => item.setTitle(title).setChecked(currentSortOrder === sortOrder).onClick(() => {
-        folderSettings.sortOrder = sortOrder;
-        void host.saveSettingsNow();
-        host.sortExplorer();
-      })
-    );
-  });
-  menu.addSeparator().addItem(
-    (item) => item.setTitle("\u5C06\u5F53\u524D\u987A\u5E8F\u4FDD\u5B58\u4E3A\u81EA\u5B9A\u4E49\u987A\u5E8F").onClick(() => {
-      new OrderConfirmModal(host.app, (isConfirmed) => {
-        var _a, _b, _c;
-        if (folderSettings.sortOrder === "custom" || !isConfirmed)
-          return;
-        const folder = host.app.vault.getAbstractFileByPath(folderPath);
-        if (!(folder instanceof import_obsidian5.TFolder))
-          return;
-        const items = (_c = (_b = (_a = host.getExplorerView()) == null ? void 0 : _a.getSortedFolderItems) == null ? void 0 : _b.call(_a, folder)) != null ? _c : [];
-        const sortedItems = host.orderManager.getSortedItems(folderSettings, items);
-        folderSettings.customOrder = sortedItems.map((i) => i.file.name);
-        folderSettings.sortOrder = "custom";
-        void host.saveSettingsNow();
-        host.sortExplorer();
-      }).open();
-    })
-  );
-  return menu;
-}
-var OrderConfirmModal = class extends import_obsidian5.Modal {
-  constructor(app, onResult) {
-    super(app);
-    this.onResult = onResult;
+  get scopeRootPath() {
+    var _a;
+    return (_a = this.host.getScopePath()) != null ? _a : "";
   }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.createEl("h3", { text: "\u4FDD\u5B58\u4E3A\u81EA\u5B9A\u4E49\u987A\u5E8F" });
-    contentEl.createEl("p", {
-      cls: "kb-modal-desc",
-      text: "\u5C06\u5F53\u524D\u6392\u5E8F\u7ED3\u679C\u56FA\u5316\u4E3A\u81EA\u5B9A\u4E49\u987A\u5E8F\uFF0C\u4E4B\u540E\u53EF\u7528\u62D6\u62FD\u624B\u52A8\u8C03\u6574\u3002"
-    });
-    const btns = contentEl.createDiv({ cls: "kb-modal-buttons" });
-    btns.createEl("button", { text: "\u786E\u5B9A", cls: "mod-cta" }).onclick = () => {
-      this.close();
-      this.onResult(true);
-    };
-    btns.createEl("button", { text: "\u53D6\u6D88" }).onclick = () => {
-      this.close();
-      this.onResult(false);
-    };
+  get scrollEl() {
+    return this.host.getScrollEl();
   }
-  onClose() {
-    this.contentEl.empty();
+  resolveDragSource(target) {
+    const el = target instanceof Element ? target : null;
+    const scroll = this.scrollEl;
+    if (!el || !scroll || !scroll.contains(el))
+      return null;
+    const row = el.closest(".tree-item");
+    const self = this.selfOf(row);
+    const path = self == null ? void 0 : self.dataset.path;
+    if (!path || !this.isInScope(path))
+      return null;
+    if (!this.app.vault.getAbstractFileByPath(path))
+      return null;
+    return { surface: this, path };
+  }
+  scrollRect() {
+    var _a, _b;
+    return (_b = (_a = this.scrollEl) == null ? void 0 : _a.getBoundingClientRect()) != null ? _b : null;
+  }
+  containsPoint(x, y) {
+    const el = this.scrollEl;
+    if (!el || !el.isConnected)
+      return false;
+    const rect = el.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+  resolveRowAtPoint(x, y) {
+    const hit = this.hitAt(x, y);
+    if (!hit)
+      return null;
+    const title = hit.closest(".nav-folder-title, .nav-file-title");
+    if (title) {
+      const path = title.dataset.path;
+      if (!path)
+        return null;
+      return {
+        path,
+        kind: title.classList.contains("nav-folder-title") ? "folder" : "file",
+        rect: title.getBoundingClientRect()
+      };
+    }
+    const folderRow = hit.closest(".tree-item.nav-folder");
+    if (folderRow) {
+      const titleEl = this.selfOf(folderRow);
+      const path = titleEl == null ? void 0 : titleEl.dataset.path;
+      if (!titleEl || !path)
+        return null;
+      const rect = titleEl.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom) {
+        return { path, kind: "folder", rect };
+      }
+    }
+    return null;
+  }
+  blankFolderAt(x, y) {
+    var _a, _b, _c;
+    const hit = this.hitAt(x, y);
+    if (!hit)
+      return null;
+    if (hit.closest(".nav-folder-title, .nav-file-title"))
+      return null;
+    const folderRow = hit.closest(".tree-item.nav-folder");
+    if (folderRow) {
+      const titleEl = this.selfOf(folderRow);
+      if (titleEl) {
+        const rect = titleEl.getBoundingClientRect();
+        if (y >= rect.top && y <= rect.bottom)
+          return null;
+      }
+      return (_a = titleEl == null ? void 0 : titleEl.dataset.path) != null ? _a : null;
+    }
+    const children = hit.closest(".nav-folder-children");
+    if (children) {
+      const folder = (_c = (_b = children.parentElement) == null ? void 0 : _b.closest(".tree-item.nav-folder")) != null ? _c : null;
+      const path = this.pathOfElement(folder);
+      return path != null ? path : this.scopeRootPath || null;
+    }
+    return this.scopeRootPath || null;
+  }
+  childRowRects(folderPath) {
+    var _a;
+    const container = this.childrenContainer(folderPath);
+    if (!container)
+      return [];
+    const rows = [];
+    for (const child of Array.from(container.children)) {
+      if (!(child instanceof HTMLElement) || !child.classList.contains("tree-item"))
+        continue;
+      const titleEl = this.selfOf(child);
+      const path = (_a = titleEl == null ? void 0 : titleEl.dataset.path) != null ? _a : this.pathOfElement(child);
+      if (!titleEl || !path)
+        continue;
+      rows.push({ path, rect: titleEl.getBoundingClientRect() });
+    }
+    return rows;
+  }
+  selectedPaths() {
+    return this.host.selectedPaths();
+  }
+  isCollapsed(path) {
+    return this.host.isCollapsed(path);
+  }
+  expand(path) {
+    this.host.expandInPlace(path);
+  }
+  orderedChildPaths(folderPath) {
+    const folder = folderPath === "/" ? this.app.vault.getRoot() : this.app.vault.getAbstractFileByPath(folderPath);
+    if (!(folder instanceof import_obsidian5.TFolder))
+      return [];
+    try {
+      return this.orderManager.getSortedItems(
+        this.getFolderSettings(folder.path),
+        folder.children.map((file) => ({ file }))
+      ).map((entry) => entry.file.path);
+    } catch (e) {
+      return folder.children.map((file) => file.path);
+    }
+  }
+  captureScroll() {
+    this.host.captureScroll();
+  }
+  restoreScrollAfterMoves() {
+    this.host.refreshAfterDrop();
+    this.host.restoreScroll();
+  }
+  isInScope(path) {
+    const scope = this.scopeRootPath;
+    if (!scope)
+      return false;
+    return path === scope || path.startsWith(scope + "/");
+  }
+  markSibling(path, side) {
+    const row = this.rowItem(path);
+    if (!row)
+      return;
+    this.markedSibling = row;
+    row.dataset.kbDropSibling = side;
+  }
+  markFolder(path) {
+    const el = path === this.scopeRootPath ? this.scrollEl : this.rowItem(path);
+    if (!el)
+      return;
+    this.markedFolder = el;
+    el.dataset.kbDropFolder = "";
+  }
+  clearMarks() {
+    if (this.markedSibling) {
+      delete this.markedSibling.dataset.kbDropSibling;
+      this.markedSibling = null;
+    }
+    if (this.markedFolder) {
+      delete this.markedFolder.dataset.kbDropFolder;
+      this.markedFolder = null;
+    }
+  }
+  markDragSource(path, active) {
+    var _a;
+    (_a = this.rowSelf(path)) == null ? void 0 : _a.classList.toggle("is-being-dragged", active);
+  }
+  onDragStart(event, path) {
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", path);
+      event.dataTransfer.setDragImage(blankDragImage, 0, 0);
+    }
+  }
+  hitAt(x, y) {
+    const scroll = this.scrollEl;
+    if (!scroll)
+      return null;
+    const hit = activeDocument.elementFromPoint(x, y);
+    if (!hit || !scroll.contains(hit))
+      return null;
+    return hit;
+  }
+  childrenContainer(folderPath) {
+    var _a, _b;
+    if (folderPath === this.scopeRootPath)
+      return this.scrollEl;
+    return (_b = (_a = this.rowItem(folderPath)) == null ? void 0 : _a.querySelector(
+      ":scope > .nav-folder-children"
+    )) != null ? _b : null;
+  }
+  rowItem(path) {
+    var _a, _b;
+    return (_b = (_a = this.rowSelf(path)) == null ? void 0 : _a.closest(".tree-item")) != null ? _b : null;
+  }
+  rowSelf(path) {
+    const scroll = this.scrollEl;
+    if (!scroll)
+      return null;
+    const escaped = path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return scroll.querySelector(`.tree-item-self[data-path="${escaped}"]`);
+  }
+  pathOfElement(el) {
+    var _a;
+    if (!el)
+      return null;
+    const self = this.selfOf(el);
+    return (_a = self == null ? void 0 : self.dataset.path) != null ? _a : null;
+  }
+  selfOf(el) {
+    var _a, _b;
+    if (!el)
+      return null;
+    if (el.matches(".tree-item-self"))
+      return el;
+    const direct = el.querySelector(":scope > .tree-item-self");
+    if (direct)
+      return direct;
+    return (_b = (_a = el.closest(".tree-item")) == null ? void 0 : _a.querySelector(
+      ":scope > .tree-item-self"
+    )) != null ? _b : null;
   }
 };
 
-// src/system.ts
+// src/tree/tree-dnd.ts
 var import_obsidian6 = require("obsidian");
+
+// src/core/log.ts
+var logger = { level: "silent" };
+var initLog = (scope, color) => (...args) => {
+  if (logger.level === "silent")
+    return;
+  window.console.log(`%c${scope}`, buildStyles(color), ...args);
+};
+var buildStyles = (color) => `
+  color: ${color};
+  background: #1d2131;
+  border: 1px solid ${color};
+  border-radius: 10px;
+  font-family: consolas, monospace;
+  font-size: 10px;
+  padding: 0px 4px;
+`;
+
+// src/tree/tree-dnd.ts
+var FOLDER_INSIDE_TOP = 0.3;
+var FOLDER_INSIDE_BOTTOM = 0.7;
+var AUTOSCROLL_ZONE = 60;
+var AUTOSCROLL_SPEED = 20;
+var EXPAND_DELAY = 1e3;
+var TreeDndController = class {
+  constructor(host) {
+    this.host = host;
+    this.log = initLog("TREE DND", "#a6ff00");
+    this.attached = false;
+    this.drag = null;
+    this.draggingPaths = /* @__PURE__ */ new Set();
+    this.dropTarget = null;
+    this.pointer = { x: 0, y: 0 };
+    this.autoscrollRaf = 0;
+    this.expandPath = null;
+    this.expandTimeout = 0;
+    this.onDragStart = (event) => {
+      var _a, _b, _c, _d;
+      if (this.drag)
+        return;
+      const source = this.host.resolveSource(event.target);
+      if (!source)
+        return;
+      const file = this.host.app.vault.getAbstractFileByPath(source.path);
+      if (!file)
+        return;
+      this.drag = {
+        surface: source.surface,
+        file,
+        pinned: this.isPinned(file.path)
+      };
+      this.draggingPaths = new Set(source.surface.selectedPaths());
+      this.draggingPaths.add(file.path);
+      document.body.classList.add("kb-dragging");
+      (_b = (_a = source.surface).markDragSource) == null ? void 0 : _b.call(_a, file.path, true);
+      (_d = (_c = source.surface).onDragStart) == null ? void 0 : _d.call(_c, event, file.path);
+      this.log(`Started dragging '${file.path}'`);
+    };
+    this.onDragOver = (event) => {
+      var _a, _b;
+      if (!this.drag)
+        return;
+      this.pointer = { x: event.clientX, y: event.clientY };
+      this.drag.surface = this.host.resolveTargetSurface(this.drag.surface, this.pointer);
+      (_b = (_a = this.drag.surface).onDragOver) == null ? void 0 : _b.call(_a);
+      this.startAutoscroll();
+      if (!this.drag.surface.containsPoint(this.pointer.x, this.pointer.y)) {
+        this.clearDropIndicators();
+        this.clearPendingExpand();
+        return;
+      }
+      if (this.resolveAndApplyDropTarget()) {
+        event.preventDefault();
+        if (event.dataTransfer)
+          event.dataTransfer.dropEffect = "move";
+      }
+    };
+    this.onDrop = (event) => {
+      if (!this.drag)
+        return;
+      this.pointer = { x: event.clientX, y: event.clientY };
+      this.drag.surface = this.host.resolveTargetSurface(this.drag.surface, this.pointer);
+      if (!this.drag.surface.containsPoint(this.pointer.x, this.pointer.y)) {
+        this.log("Dropped outside tree, skipping move");
+        this.resetDrag();
+        return;
+      }
+      event.preventDefault();
+      if (!this.dropTarget)
+        this.resolveAndApplyDropTarget();
+      this.commitDrop();
+      this.resetDrag();
+    };
+    this.onDragEnd = () => {
+      if (!this.drag)
+        return;
+      this.log(`Ended dragging '${this.drag.file.path}'`);
+      this.resetDrag();
+    };
+    this.onKeyDown = (event) => {
+      if (this.drag && event.key === "Escape")
+        this.resetDrag();
+    };
+    /** 新指针手势意味着上一次拖拽已结束但没收尾（拖拽源被重绘替换时 Chrome 可能不发 dragend） */
+    this.onPointerDown = () => {
+      if (this.drag)
+        this.resetDrag();
+    };
+    /** 拖拽期间浏览器会吞掉 mousemove；重新出现 buttons=0 的移动说明拖拽已结束 */
+    this.onMouseMove = (event) => {
+      if (this.drag && event.buttons === 0)
+        this.resetDrag();
+    };
+    this.onWindowBlur = () => {
+      if (this.drag)
+        this.resetDrag();
+    };
+    this.handleAutoscroll = () => {
+      var _a, _b;
+      const drag = this.drag;
+      const el = (_a = drag == null ? void 0 : drag.surface.scrollEl) != null ? _a : null;
+      const rect = (_b = drag == null ? void 0 : drag.surface.scrollRect()) != null ? _b : null;
+      if (!drag || !el || !rect) {
+        this.autoscrollRaf = 0;
+        return;
+      }
+      if (this.pointer.x < rect.left || this.pointer.x > rect.right) {
+        this.autoscrollRaf = 0;
+        return;
+      }
+      const distToTop = this.pointer.y - rect.top;
+      const distToBottom = rect.bottom - this.pointer.y;
+      let speed = 0;
+      if (distToTop < AUTOSCROLL_ZONE)
+        speed = -this.resolveScrollSpeed(distToTop);
+      else if (distToBottom < AUTOSCROLL_ZONE)
+        speed = this.resolveScrollSpeed(distToBottom);
+      if (!speed) {
+        this.autoscrollRaf = 0;
+        return;
+      }
+      const before = el.scrollTop;
+      el.scrollTop += speed;
+      if (el.scrollTop === before) {
+        this.autoscrollRaf = 0;
+        return;
+      }
+      this.resolveAndApplyDropTarget();
+      this.autoscrollRaf = window.requestAnimationFrame(this.handleAutoscroll);
+    };
+  }
+  /** 挂在 document 上：文件浏览器重建、多个 Files 面板都不影响监听 */
+  attach() {
+    if (this.attached)
+      return;
+    this.attached = true;
+    document.addEventListener("dragstart", this.onDragStart, true);
+    document.addEventListener("dragover", this.onDragOver, true);
+    document.addEventListener("drop", this.onDrop, true);
+    document.addEventListener("dragend", this.onDragEnd, true);
+    document.addEventListener("keydown", this.onKeyDown, true);
+    document.addEventListener("pointerdown", this.onPointerDown, true);
+    document.addEventListener("mousemove", this.onMouseMove, true);
+    window.addEventListener("blur", this.onWindowBlur);
+    this.log("Attached");
+  }
+  detach() {
+    document.removeEventListener("dragstart", this.onDragStart, true);
+    document.removeEventListener("dragover", this.onDragOver, true);
+    document.removeEventListener("drop", this.onDrop, true);
+    document.removeEventListener("dragend", this.onDragEnd, true);
+    document.removeEventListener("keydown", this.onKeyDown, true);
+    document.removeEventListener("pointerdown", this.onPointerDown, true);
+    document.removeEventListener("mousemove", this.onMouseMove, true);
+    window.removeEventListener("blur", this.onWindowBlur);
+    this.attached = false;
+    this.resetDrag();
+    this.log("Detached");
+  }
+  get draggedItem() {
+    var _a, _b;
+    return (_b = (_a = this.drag) == null ? void 0 : _a.file) != null ? _b : null;
+  }
+  get activeSurface() {
+    var _a, _b;
+    return (_b = (_a = this.drag) == null ? void 0 : _a.surface) != null ? _b : null;
+  }
+  get dropSiblingPath() {
+    var _a;
+    return ((_a = this.dropTarget) == null ? void 0 : _a.kind) === "sibling" ? this.dropTarget.siblingPath : null;
+  }
+  get dropFolderPath() {
+    var _a, _b;
+    return (_b = (_a = this.dropTarget) == null ? void 0 : _a.folderPath) != null ? _b : null;
+  }
+  resolveAndApplyDropTarget() {
+    this.clearDropIndicators();
+    this.resolveDropTarget();
+    this.applyDropIndicators();
+    return !!this.dropTarget;
+  }
+  resolveDropTarget() {
+    const drag = this.drag;
+    if (!drag)
+      return;
+    const hit = drag.surface.resolveRowAtPoint(this.pointer.x, this.pointer.y);
+    if (hit) {
+      this.resolveRowTarget(hit);
+      return;
+    }
+    const folderPath = drag.surface.blankFolderAt(this.pointer.x, this.pointer.y);
+    if (folderPath === null)
+      return;
+    this.resolveBlankTarget(folderPath);
+  }
+  resolveRowTarget(hit) {
+    const drag = this.drag;
+    if (!drag || !drag.surface.isInScope(hit.path))
+      return;
+    if (hit.kind === "file") {
+      this.clearPendingExpand();
+      const ratio2 = hit.rect.height > 0 ? (this.pointer.y - hit.rect.top) / hit.rect.height : 0.5;
+      this.setSiblingTarget(hit.path, ratio2 < 0.5 ? "before" : "after");
+      return;
+    }
+    const ratio = hit.rect.height > 0 ? (this.pointer.y - hit.rect.top) / hit.rect.height : 0.5;
+    if (ratio > FOLDER_INSIDE_TOP && ratio < FOLDER_INSIDE_BOTTOM) {
+      if (drag.pinned || this.isSelfOrDescendant(hit.path) || this.draggingPaths.has(hit.path)) {
+        this.clearPendingExpand();
+        return;
+      }
+      this.dropTarget = { kind: "folder", folderPath: hit.path };
+      if (drag.surface.isCollapsed(hit.path))
+        this.scheduleFolderExpand(hit.path);
+      else
+        this.clearPendingExpand();
+      return;
+    }
+    this.clearPendingExpand();
+    this.setSiblingTarget(hit.path, ratio < 0.5 ? "before" : "after");
+  }
+  /** 空白/行距/右侧留白：按方向感知找最近的同级行；没有行才退化成移入文件夹 */
+  resolveBlankTarget(folderPath) {
+    var _a, _b;
+    const drag = this.drag;
+    if (!drag || !folderPath)
+      return;
+    this.clearPendingExpand();
+    if (!drag.surface.isInScope(folderPath))
+      return;
+    if (this.isSelfOrDescendant(folderPath))
+      return;
+    if (this.draggingPaths.has(folderPath))
+      return;
+    if (drag.pinned && ((_a = drag.file.parent) == null ? void 0 : _a.path) !== folderPath)
+      return;
+    const near = this.nearestSiblingRow(folderPath);
+    if (near) {
+      this.setSiblingTarget(near.path, near.side);
+      if (((_b = this.dropTarget) == null ? void 0 : _b.kind) === "sibling")
+        return;
+    }
+    if (drag.pinned)
+      return;
+    this.dropTarget = { kind: "folder", folderPath };
+  }
+  /** 在文件夹的直接子行里找离指针最近的一行，并给出「前/后」方向 */
+  nearestSiblingRow(folderPath) {
+    var _a;
+    const drag = this.drag;
+    if (!drag)
+      return null;
+    const rows = drag.surface.childRowRects(folderPath);
+    let best = null;
+    for (const row of rows) {
+      if (this.isSelfOrDescendant(row.path))
+        continue;
+      if (this.draggingPaths.has(row.path))
+        continue;
+      const pinned = this.isPinned(row.path);
+      if (pinned !== drag.pinned)
+        continue;
+      if (drag.pinned && ((_a = drag.file.parent) == null ? void 0 : _a.path) !== folderPath)
+        continue;
+      const rect = row.rect;
+      let side;
+      let dist;
+      if (this.pointer.y < rect.top) {
+        dist = rect.top - this.pointer.y;
+        side = "before";
+      } else if (this.pointer.y > rect.bottom) {
+        dist = this.pointer.y - rect.bottom;
+        side = "after";
+      } else {
+        dist = 0;
+        side = this.pointer.y < rect.top + rect.height / 2 ? "before" : "after";
+      }
+      if (!best || dist < best.dist - 0.01 || Math.abs(dist - best.dist) <= 0.01 && side === "before" && best.side === "after") {
+        best = { path: row.path, side, dist };
+      }
+    }
+    return best ? { path: best.path, side: best.side } : null;
+  }
+  setSiblingTarget(rowPath, side) {
+    var _a;
+    const drag = this.drag;
+    if (!drag)
+      return;
+    if (this.isSelfOrDescendant(rowPath))
+      return;
+    if (this.draggingPaths.has(rowPath))
+      return;
+    const folderPath = this.parentPathOf(rowPath);
+    if (!folderPath || !drag.surface.isInScope(folderPath))
+      return;
+    if (this.isPinned(rowPath) !== drag.pinned)
+      return;
+    if (drag.pinned && ((_a = drag.file.parent) == null ? void 0 : _a.path) !== folderPath)
+      return;
+    this.dropTarget = { kind: "sibling", folderPath, siblingPath: rowPath, side };
+  }
+  applyDropIndicators() {
+    const target = this.dropTarget;
+    const drag = this.drag;
+    if (!target || !drag)
+      return;
+    if (target.kind === "sibling")
+      drag.surface.markSibling(target.siblingPath, target.side);
+    else
+      drag.surface.markFolder(target.folderPath);
+  }
+  clearDropIndicators() {
+    var _a;
+    (_a = this.drag) == null ? void 0 : _a.surface.clearMarks();
+    this.dropTarget = null;
+  }
+  commitDrop() {
+    const drag = this.drag;
+    const target = this.dropTarget;
+    if (!drag || !target)
+      return;
+    const surface = drag.surface;
+    const dropFolderPath = target.folderPath;
+    if (!surface.isInScope(dropFolderPath)) {
+      this.log("Drop target outside scope, skipping");
+      return;
+    }
+    const dropFolder = this.folderAt(dropFolderPath);
+    if (!dropFolder) {
+      this.log("Drop folder not found, skipping");
+      return;
+    }
+    let dropSiblingPath = target.kind === "sibling" ? target.siblingPath : null;
+    const droppedOnSibling = target.kind === "sibling";
+    if (droppedOnSibling) {
+      this.ensureCustomSortMode(dropFolderPath);
+    } else {
+      dropSiblingPath = this.lastChildPath(dropFolderPath);
+    }
+    const selectedItems = this.resolveSelectedFiles();
+    const isDraggedSelected = selectedItems.some((item) => item.path === drag.file.path);
+    if (isDraggedSelected && selectedItems.length > 0) {
+      const pinnedStates = new Set(selectedItems.map((item) => this.isPinned(item.path)));
+      if (pinnedStates.size > 1) {
+        this.log("Selection mixes pinned/unpinned, skipping");
+        return;
+      }
+      if (pinnedStates.has(true)) {
+        const parentPaths = new Set(selectedItems.map((item) => {
+          var _a;
+          return (_a = item.parent) == null ? void 0 : _a.path;
+        }));
+        if (parentPaths.size > 1) {
+          this.log("Pinned selection spans folders, skipping");
+          return;
+        }
+      }
+      surface.captureScroll();
+      const firstSide = droppedOnSibling ? target.side : "after";
+      selectedItems.forEach((item, idx) => {
+        const insertSide = idx === 0 ? firstSide : "after";
+        const newPath = this.resolveNewPath(item, dropFolderPath);
+        this.moveItem(item, newPath, dropFolderPath, dropSiblingPath, insertSide);
+        dropSiblingPath = newPath;
+      });
+    } else {
+      surface.captureScroll();
+      const newPath = this.resolveNewPath(drag.file, dropFolderPath);
+      this.moveItem(
+        drag.file,
+        newPath,
+        dropFolderPath,
+        dropSiblingPath,
+        droppedOnSibling ? target.side : "after"
+      );
+    }
+    surface.restoreScrollAfterMoves();
+  }
+  /** 把目标文件夹当前显示顺序固化成 customOrder，再切到自定义顺序 */
+  ensureCustomSortMode(folderPath) {
+    var _a;
+    const items = this.host.getSettings().items;
+    let folderSettings = items[folderPath];
+    if ((folderSettings == null ? void 0 : folderSettings.sortOrder) === "custom")
+      return;
+    const folder = this.folderAt(folderPath);
+    const surface = (_a = this.drag) == null ? void 0 : _a.surface;
+    if (!folder || !surface)
+      return;
+    if (!folderSettings) {
+      folderSettings = {
+        isPinned: false,
+        isHidden: false,
+        sortOrder: "custom",
+        customOrder: []
+      };
+      items[folderPath] = folderSettings;
+    }
+    folderSettings.customOrder = surface.orderedChildPaths(folderPath).map((path) => this.nameOf(path));
+    folderSettings.sortOrder = "custom";
+  }
+  /** 目标文件夹当前显示顺序里的最后一个非拖拽子项，用于「移入文件夹」落到末尾 */
+  lastChildPath(folderPath) {
+    const drag = this.drag;
+    if (!drag)
+      return null;
+    const ordered = drag.surface.orderedChildPaths(folderPath);
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const path = ordered[i];
+      if (path === drag.file.path || this.draggingPaths.has(path))
+        continue;
+      return path;
+    }
+    return null;
+  }
+  resolveSelectedFiles() {
+    const drag = this.drag;
+    if (!drag)
+      return [];
+    const vault = this.host.app.vault;
+    const files = drag.surface.selectedPaths().map((path) => vault.getAbstractFileByPath(path)).filter((file) => !!file);
+    return files.filter(
+      (file) => !files.some(
+        (folderCandidate) => folderCandidate instanceof import_obsidian6.TFolder && folderCandidate.path !== file.path && file.path.startsWith(folderCandidate.path + "/")
+      )
+    );
+  }
+  resolveNewPath(item, newParentPath) {
+    var _a, _b;
+    const prefix = newParentPath === "/" ? "" : `${newParentPath}/`;
+    let newPath = `${prefix}${item.name}`;
+    const isPathChanged = item.path !== newPath;
+    const vault = this.host.app.vault;
+    const duplicate2 = (_b = (_a = vault.getAbstractFileByPathInsensitive) == null ? void 0 : _a.call(vault, newPath)) != null ? _b : null;
+    if (isPathChanged && duplicate2) {
+      if (item instanceof import_obsidian6.TFile) {
+        const basePath = newPath.slice(0, -(item.extension.length + 1));
+        newPath = vault.getAvailablePath(basePath, item.extension);
+      } else if (item instanceof import_obsidian6.TFolder) {
+        newPath = vault.getAvailablePath(newPath, "");
+      }
+    }
+    return newPath;
+  }
+  moveItem(item, newPath, folderPath, siblingPath, insertSide) {
+    var _a;
+    const folderSettings = this.host.getSettings().items[folderPath];
+    if (item.path === newPath && (folderSettings == null ? void 0 : folderSettings.sortOrder) !== "custom") {
+      this.log("Already in drop folder with non-custom order, skipping");
+      return;
+    }
+    this.host.orderManager.move(item.path, newPath, siblingPath != null ? siblingPath : void 0, insertSide);
+    void ((_a = this.host.app.fileManager) == null ? void 0 : _a.renameFile(item, newPath));
+  }
+  startAutoscroll() {
+    if (!this.autoscrollRaf) {
+      this.autoscrollRaf = window.requestAnimationFrame(this.handleAutoscroll);
+    }
+  }
+  stopAutoscroll() {
+    window.cancelAnimationFrame(this.autoscrollRaf);
+    this.autoscrollRaf = 0;
+  }
+  resolveScrollSpeed(distToEdge) {
+    return (1 - distToEdge / AUTOSCROLL_ZONE) ** 2 * AUTOSCROLL_SPEED;
+  }
+  scheduleFolderExpand(folderPath) {
+    this.clearPendingExpand();
+    this.expandPath = folderPath;
+    this.expandTimeout = window.setTimeout(() => {
+      var _a;
+      const surface = (_a = this.drag) == null ? void 0 : _a.surface;
+      if (!surface)
+        return;
+      surface.expand(folderPath);
+      this.log(`Folder '${folderPath}' expanded after timeout`);
+    }, EXPAND_DELAY);
+  }
+  clearPendingExpand() {
+    window.clearTimeout(this.expandTimeout);
+    this.expandTimeout = 0;
+    this.expandPath = null;
+  }
+  resetDrag() {
+    var _a, _b;
+    const drag = this.drag;
+    if (drag) {
+      drag.surface.clearMarks();
+      (_b = (_a = drag.surface).markDragSource) == null ? void 0 : _b.call(_a, drag.file.path, false);
+    }
+    this.clearPendingExpand();
+    this.stopAutoscroll();
+    this.drag = null;
+    this.dropTarget = null;
+    this.draggingPaths.clear();
+    this.pointer = { x: 0, y: 0 };
+    document.body.classList.remove("kb-dragging");
+  }
+  isSelfOrDescendant(path) {
+    const drag = this.drag;
+    if (!drag)
+      return false;
+    return path === drag.file.path || path.startsWith(drag.file.path + "/");
+  }
+  isPinned(path) {
+    return this.host.getItemSettings(path).isPinned;
+  }
+  folderAt(path) {
+    const folder = path === "/" ? this.host.app.vault.getRoot() : this.host.app.vault.getAbstractFileByPath(path);
+    return folder instanceof import_obsidian6.TFolder ? folder : null;
+  }
+  parentPathOf(path) {
+    var _a;
+    const parent = (_a = this.host.app.vault.getAbstractFileByPath(path)) == null ? void 0 : _a.parent;
+    if (parent)
+      return parent.path;
+    const cut = path.lastIndexOf("/");
+    return cut <= 0 ? "/" : path.slice(0, cut);
+  }
+  nameOf(path) {
+    return path.substring(path.lastIndexOf("/") + 1);
+  }
+};
+
+// src/tree/tree-model.ts
+var import_obsidian7 = require("obsidian");
+var collator = new Intl.Collator(void 0, { sensitivity: "base", numeric: true });
+var TreeModel = class {
+  constructor(host) {
+    this.host = host;
+    this.rootPath = null;
+    this.childCache = /* @__PURE__ */ new Map();
+    this.rowIndex = /* @__PURE__ */ new Map();
+  }
+  get root() {
+    return this.rootPath;
+  }
+  setRootPath(path) {
+    if (this.rootPath === path)
+      return;
+    this.rootPath = path;
+    this.invalidateAll();
+  }
+  invalidateAll() {
+    this.childCache.clear();
+    this.rowIndex.clear();
+  }
+  /** 失效某个路径及其子孙；同时失效父级，让置顶/隐藏变化反映到父级排序里 */
+  invalidate(path) {
+    if (!path) {
+      this.invalidateAll();
+      return;
+    }
+    const prefix = path + "/";
+    for (const key of [...this.childCache.keys()]) {
+      if (key === path || key.startsWith(prefix))
+        this.childCache.delete(key);
+    }
+    for (const key of [...this.rowIndex.keys()]) {
+      if (key === path || key.startsWith(prefix))
+        this.rowIndex.delete(key);
+    }
+    const parent = this.parentPathOf(path);
+    if (parent) {
+      this.childCache.delete(parent);
+      this.rowIndex.delete(path);
+    }
+  }
+  isInScope(path) {
+    if (!this.rootPath)
+      return false;
+    return path === this.rootPath || path.startsWith(this.rootPath + "/");
+  }
+  rootFolder() {
+    if (!this.rootPath)
+      return null;
+    const folder = this.host.app.vault.getAbstractFileByPath(this.rootPath);
+    return folder instanceof import_obsidian7.TFolder ? folder : null;
+  }
+  /** 文件夹的直接子行，按当前显示顺序（含隐藏项，附件/非 md 不丢） */
+  childRows(folderPath) {
+    const cached = this.childCache.get(folderPath);
+    if (cached)
+      return cached;
+    const folder = folderPath === "/" ? this.host.app.vault.getRoot() : this.host.app.vault.getAbstractFileByPath(folderPath);
+    if (!(folder instanceof import_obsidian7.TFolder) || !this.isInScope(folder.path)) {
+      const empty = [];
+      this.childCache.set(folderPath, empty);
+      return empty;
+    }
+    const ordered = this.sortChildren(folder);
+    const rows = ordered.map((file) => this.makeRow(file, folder.path));
+    this.childCache.set(folderPath, rows);
+    for (const row of rows)
+      this.rowIndex.set(row.path, row);
+    return rows;
+  }
+  /** 展开可见行（折叠的文件夹只保留自身一行） */
+  rows() {
+    const folder = this.rootFolder();
+    if (!folder)
+      return [];
+    const activePath = this.host.getActivePath();
+    const out = [];
+    const walk = (parent, depth) => {
+      for (const row of this.childRows(parent.path)) {
+        row.depth = depth;
+        row.active = !!activePath && row.path === activePath;
+        row.collapsed = row.kind === "folder" && this.host.isCollapsed(row.path);
+        out.push(row);
+        if (row.kind === "folder" && !row.collapsed) {
+          walk(row.file, depth + 1);
+        }
+      }
+    };
+    walk(folder, 0);
+    return out;
+  }
+  row(path) {
+    var _a;
+    return (_a = this.rowIndex.get(path)) != null ? _a : null;
+  }
+  sortChildren(folder) {
+    const showHidden = this.host.getSettings().showHidden;
+    const children = showHidden ? folder.children : folder.children.filter((file) => !this.host.isHiddenByRule(file.path));
+    try {
+      const settings = this.host.getFolderSettings(folder.path);
+      return this.host.orderManager.getSortedItems(settings, children.map((file) => ({ file }))).map((entry) => entry.file);
+    } catch (e) {
+      return children.slice().sort((a, b) => collator.compare(a.name, b.name));
+    }
+  }
+  makeRow(file, parentPath) {
+    var _a;
+    return {
+      file,
+      path: file.path,
+      name: file instanceof import_obsidian7.TFile ? file.basename : file.name,
+      kind: file instanceof import_obsidian7.TFolder ? "folder" : "file",
+      depth: 0,
+      parentPath,
+      pinned: !!((_a = this.host.getSettings().items[file.path]) == null ? void 0 : _a.isPinned),
+      hidden: this.host.isHiddenByRule(file.path),
+      active: false,
+      collapsed: false
+    };
+  }
+  parentPathOf(path) {
+    var _a;
+    if (path === "/")
+      return null;
+    const parent = (_a = this.host.app.vault.getAbstractFileByPath(path)) == null ? void 0 : _a.parent;
+    if (parent)
+      return parent.path;
+    const cut = path.lastIndexOf("/");
+    return cut === -1 ? "/" : cut === 0 ? "/" : path.slice(0, cut);
+  }
+};
+
+// src/tree/tree-renderer.ts
+var import_obsidian8 = require("obsidian");
+var OVERSCAN = 60;
+var DEFAULT_PITCH = 26.9;
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+function escapeAttr(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+var KbTreeRenderer = class {
+  constructor(body, model, host) {
+    this.body = body;
+    this.model = model;
+    this.host = host;
+    this.snapshot = { rows: [], index: /* @__PURE__ */ new Map(), subtree: [] };
+    this.pitch = DEFAULT_PITCH;
+    this.paddingTop = 0;
+    this.lastStart = -1;
+    this.lastEnd = -1;
+    this.scrollRaf = 0;
+    this.layoutRaf = 0;
+    this.measureRaf = 0;
+    this.destroyed = false;
+    this.onScroll = () => {
+      if (this.destroyed || this.scrollRaf)
+        return;
+      this.scrollRaf = window.requestAnimationFrame(() => {
+        this.scrollRaf = 0;
+        if (document.body.classList.contains("kb-dragging"))
+          return;
+        this.updateWindow();
+      });
+    };
+    this.activePath = host.getActivePath();
+    this.body.addEventListener("scroll", this.onScroll, { passive: true });
+    this.resizeObserver = new ResizeObserver(() => this.scheduleLayout());
+    this.resizeObserver.observe(this.body);
+  }
+  render(scrollTop = this.body.scrollTop) {
+    if (this.destroyed)
+      return;
+    this.snapshot = this.buildSnapshot(this.model.rows());
+    this.measure();
+    const { start, end } = this.computeRange(scrollTop);
+    this.renderWindow(start, end);
+    this.lastStart = start;
+    this.lastEnd = end;
+    this.body.scrollTop = Math.max(0, scrollTop);
+    if (!this.measureRaf && this.snapshot.rows.length > 0) {
+      this.measureRaf = window.requestAnimationFrame(() => {
+        this.measureRaf = 0;
+        if (this.destroyed || !this.body.isConnected)
+          return;
+        const before = this.pitch;
+        this.measure();
+        if (Math.abs(before - this.pitch) > 0.05)
+          this.render(this.body.scrollTop);
+      });
+    }
+  }
+  updateActive(path) {
+    this.activePath = path;
+    if (this.destroyed)
+      return;
+    for (const self of Array.from(
+      this.body.querySelectorAll(".tree-item-self[data-path]")
+    )) {
+      self.classList.toggle("is-active", !!path && self.dataset.path === path);
+    }
+  }
+  /** 只切换已挂载行的选中态，不重建窗口 */
+  updateSelection(isSelected) {
+    if (this.destroyed)
+      return;
+    for (const self of Array.from(
+      this.body.querySelectorAll(".tree-item-self[data-path]")
+    )) {
+      const path = self.dataset.path;
+      if (!path)
+        continue;
+      self.classList.toggle("is-selected", isSelected(path));
+    }
+  }
+  updateFocus(path) {
+    if (this.destroyed)
+      return;
+    for (const self of Array.from(
+      this.body.querySelectorAll(".tree-item-self[data-path]")
+    )) {
+      self.classList.toggle("has-focus", !!path && self.dataset.path === path);
+    }
+  }
+  get visibleCount() {
+    return this.snapshot.rows.length;
+  }
+  pathAt(index) {
+    var _a, _b;
+    return (_b = (_a = this.snapshot.rows[index]) == null ? void 0 : _a.path) != null ? _b : null;
+  }
+  indexOfPath(path) {
+    var _a;
+    return (_a = this.snapshot.index.get(path)) != null ? _a : -1;
+  }
+  /** 两个可见行之间的完整行路径（含两端），顺序按当前显示顺序 */
+  pathsInRange(fromPath, toPath) {
+    const from = this.snapshot.index.get(fromPath);
+    const to = this.snapshot.index.get(toPath);
+    if (from === void 0 || to === void 0)
+      return null;
+    const start = Math.min(from, to);
+    const end = Math.max(from, to);
+    return this.snapshot.rows.slice(start, end + 1).map((row) => row.path);
+  }
+  rowSelf(path) {
+    if (this.destroyed)
+      return null;
+    return this.body.querySelector(
+      `.tree-item-self[data-path="${escapeAttr(path)}"]`
+    );
+  }
+  /** 自动定位：行不在视口内时滚到它附近；已在视口内不打扰用户 */
+  scrollToPath(path) {
+    if (this.destroyed)
+      return;
+    const index = this.snapshot.index.get(path);
+    if (index === void 0)
+      return;
+    const top = this.paddingTop + index * this.pitch;
+    const viewTop = this.body.scrollTop;
+    const viewBottom = viewTop + this.body.clientHeight;
+    if (top >= viewTop + 2 && top + this.pitch <= viewBottom - 2)
+      return;
+    const target = Math.max(0, top - Math.max(0, (this.body.clientHeight - this.pitch) / 3));
+    this.render(target);
+  }
+  /**
+   * 拖拽悬停展开：就地插入子行，不重建正在拖拽的源节点。
+   * 展开后占位条会暂时失真，dragend 时由视图整窗重绘修正。
+   */
+  expandInPlace(path) {
+    var _a;
+    if (this.destroyed)
+      return;
+    const index = this.snapshot.index.get(path);
+    if (index === void 0)
+      return;
+    const row = this.snapshot.rows[index];
+    if (row.kind !== "folder" || !(row.file instanceof import_obsidian8.TFolder))
+      return;
+    const self = this.body.querySelector(
+      `.tree-item-self[data-path="${escapeAttr(path)}"]`
+    );
+    const item = self == null ? void 0 : self.closest(".tree-item");
+    if (!item) {
+      this.render();
+      return;
+    }
+    item.classList.remove("is-collapsed");
+    (_a = self == null ? void 0 : self.querySelector(".collapse-icon")) == null ? void 0 : _a.classList.remove("is-collapsed");
+    let sub = item.querySelector(":scope > .nav-folder-children");
+    if (!sub) {
+      sub = document.createElement("div");
+      sub.className = "tree-item-children nav-folder-children";
+      item.appendChild(sub);
+    }
+    sub.replaceChildren();
+    const children = this.model.childRows(path);
+    for (const child of children)
+      child.depth = row.depth + 1;
+    this.appendFullSubtree(sub, children);
+  }
+  destroy() {
+    this.destroyed = true;
+    this.resizeObserver.disconnect();
+    window.cancelAnimationFrame(this.scrollRaf);
+    window.cancelAnimationFrame(this.layoutRaf);
+    window.cancelAnimationFrame(this.measureRaf);
+    this.scrollRaf = 0;
+    this.layoutRaf = 0;
+    this.measureRaf = 0;
+    this.body.removeEventListener("scroll", this.onScroll);
+  }
+  scheduleLayout() {
+    if (this.destroyed || this.layoutRaf)
+      return;
+    this.layoutRaf = window.requestAnimationFrame(() => {
+      this.layoutRaf = 0;
+      if (this.destroyed)
+        return;
+      this.measure();
+      this.updateWindow();
+    });
+  }
+  updateWindow() {
+    const n = this.snapshot.rows.length;
+    if (!n)
+      return;
+    const scrollTop = this.body.scrollTop;
+    const { start, end } = this.computeRange(scrollTop);
+    if (start === this.lastStart && end === this.lastEnd)
+      return;
+    this.renderWindow(start, end);
+    this.lastStart = start;
+    this.lastEnd = end;
+    this.body.scrollTop = scrollTop;
+  }
+  computeRange(scrollTop) {
+    const n = this.snapshot.rows.length;
+    if (!n)
+      return { start: 0, end: 0 };
+    const first = Math.floor((scrollTop - this.paddingTop) / this.pitch);
+    const last = Math.ceil(
+      (scrollTop + this.body.clientHeight - this.paddingTop) / this.pitch
+    );
+    const start = clamp(first - OVERSCAN, 0, n);
+    const end = clamp(last + OVERSCAN, start, n);
+    return { start, end: Math.max(end, Math.min(n, start + 1)) };
+  }
+  renderWindow(start, end) {
+    var _a, _b;
+    const { rows, index } = this.snapshot;
+    const required = /* @__PURE__ */ new Set();
+    for (let i = start; i < end; i++) {
+      const row = rows[i];
+      if (!row)
+        continue;
+      required.add(row.path);
+      let parentPath = row.parentPath;
+      while (parentPath && parentPath !== this.model.root) {
+        required.add(parentPath);
+        const parentIndex = index.get(parentPath);
+        if (parentIndex === void 0)
+          break;
+        parentPath = (_b = (_a = rows[parentIndex]) == null ? void 0 : _a.parentPath) != null ? _b : "";
+      }
+    }
+    const fragment = document.createDocumentFragment();
+    const root = this.model.rootFolder();
+    if (root) {
+      this.renderChildList(fragment, this.model.childRows(root.path), required);
+    }
+    this.body.replaceChildren(fragment);
+  }
+  renderChildList(container, children, required) {
+    let skipped = 0;
+    const flushSpacer = () => {
+      if (skipped <= 0)
+        return;
+      container.appendChild(this.makeSpacer(skipped * this.pitch));
+      skipped = 0;
+    };
+    for (const child of children) {
+      if (!required.has(child.path)) {
+        skipped += this.subtreeOf(child.path);
+        continue;
+      }
+      flushSpacer();
+      const item = this.makeRow(child);
+      container.appendChild(item);
+      if (child.kind === "folder" && !child.collapsed) {
+        const sub = document.createElement("div");
+        sub.className = "tree-item-children nav-folder-children";
+        this.renderChildList(sub, this.model.childRows(child.path), required);
+        item.appendChild(sub);
+      }
+    }
+    flushSpacer();
+  }
+  subtreeOf(path) {
+    var _a;
+    const index = this.snapshot.index.get(path);
+    if (index === void 0)
+      return 1;
+    return (_a = this.snapshot.subtree[index]) != null ? _a : 1;
+  }
+  makeSpacer(height) {
+    const spacer = document.createElement("div");
+    spacer.className = "kb-tree-spacer";
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.height = `${Math.max(0, height).toFixed(2)}px`;
+    return spacer;
+  }
+  makeRow(row) {
+    const isFolder = row.kind === "folder";
+    const item = document.createElement("div");
+    item.className = `tree-item ${isFolder ? "nav-folder" : "nav-file"}`;
+    item.dataset.kind = row.kind;
+    item.setAttribute("draggable", "true");
+    if (row.hidden)
+      item.classList.add("kb-hidden");
+    const self = document.createElement("div");
+    self.className = isFolder ? "tree-item-self nav-folder-title is-clickable mod-collapsible" : "tree-item-self nav-file-title tappable is-clickable";
+    self.dataset.path = row.path;
+    self.tabIndex = -1;
+    self.setAttribute("draggable", "true");
+    self.style.setProperty("margin-inline-start", `${-17 * row.depth}px`, "important");
+    self.style.setProperty(
+      "padding-inline-start",
+      `${24 + 17 * row.depth}px`,
+      "important"
+    );
+    if (row.path === this.host.getDraggingPath())
+      self.classList.add("is-being-dragged");
+    if (row.path === this.host.getFocusedPath())
+      self.classList.add("has-focus");
+    if (this.host.isSelected(row.path))
+      self.classList.add("is-selected");
+    if (isFolder) {
+      const collapse = document.createElement("div");
+      collapse.className = "tree-item-icon collapse-icon";
+      (0, import_obsidian8.setIcon)(collapse, "right-triangle");
+      if (row.collapsed) {
+        item.classList.add("is-collapsed");
+        collapse.classList.add("is-collapsed");
+      }
+      self.appendChild(collapse);
+    }
+    const inner = document.createElement("div");
+    inner.className = isFolder ? "tree-item-inner nav-folder-title-content" : "tree-item-inner nav-file-title-content";
+    inner.textContent = row.name;
+    self.appendChild(inner);
+    if (!isFolder) {
+      const extension = row.file.extension;
+      if (extension && extension !== "md") {
+        const tag = document.createElement("div");
+        tag.className = "nav-file-tag";
+        tag.textContent = extension;
+        self.appendChild(tag);
+      }
+    }
+    if (row.pinned)
+      this.mountPin(self);
+    if (isFolder) {
+      const folder = row.file;
+      self.addEventListener("click", (event) => {
+        if (event.button !== 0)
+          return;
+        this.host.onFolderClick(folder, event);
+      });
+      self.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        this.host.onFolderContextMenu(folder, event);
+      });
+    } else {
+      const file = row.file;
+      if (row.path === this.activePath)
+        self.classList.add("is-active");
+      self.addEventListener("click", (event) => {
+        if (event.button !== 0)
+          return;
+        this.host.onFileClick(file, event);
+      });
+      self.addEventListener("auxclick", (event) => {
+        if (event.button !== 1)
+          return;
+        this.host.onFileAuxClick(file, event);
+      });
+      self.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        this.host.onFileContextMenu(file, event);
+      });
+    }
+    item.appendChild(self);
+    return item;
+  }
+  /** 悬停展开时不再走窗口裁剪：整段子树直接挂进去，dragend 后统一重绘 */
+  appendFullSubtree(container, children) {
+    for (const child of children) {
+      if (child.kind === "folder") {
+        child.collapsed = this.host.isCollapsed(child.path);
+      }
+      const item = this.makeRow(child);
+      container.appendChild(item);
+      if (child.kind === "folder" && !child.collapsed) {
+        const sub = document.createElement("div");
+        sub.className = "tree-item-children nav-folder-children";
+        const kids = this.model.childRows(child.path);
+        for (const kid of kids)
+          kid.depth = child.depth + 1;
+        this.appendFullSubtree(sub, kids);
+        item.appendChild(sub);
+      }
+    }
+  }
+  mountPin(self) {
+    const indicator = document.createElement("div");
+    indicator.className = "kb-indicator";
+    const pin = document.createElement("div");
+    pin.className = "kb-pin-indicator";
+    indicator.appendChild(pin);
+    (0, import_obsidian8.setIcon)(pin, "pin");
+    self.appendChild(indicator);
+  }
+  measure() {
+    const sample = this.body.querySelector(".tree-item-self[data-path]");
+    if (sample) {
+      const rect = sample.getBoundingClientRect();
+      const marginBottom = parseFloat(getComputedStyle(sample).marginBottom) || 0;
+      if (rect.height > 0)
+        this.pitch = rect.height + marginBottom;
+    }
+    const style = getComputedStyle(this.body);
+    this.paddingTop = parseFloat(style.paddingTop) || 0;
+  }
+  buildSnapshot(rows) {
+    const index = /* @__PURE__ */ new Map();
+    rows.forEach((row, i) => index.set(row.path, i));
+    const n = rows.length;
+    const subtree = new Array(n).fill(1);
+    const stack = [];
+    for (let i = 0; i < n; i++) {
+      while (stack.length > 0) {
+        const top = stack[stack.length - 1];
+        if (rows[top].depth < rows[i].depth)
+          break;
+        stack.pop();
+        subtree[top] = i - top;
+      }
+      stack.push(i);
+    }
+    while (stack.length > 0) {
+      const top = stack.pop();
+      subtree[top] = n - top;
+    }
+    return { rows, index, subtree };
+  }
+};
+
+// src/tree/tree-interactions.ts
+var TreeSelection = class {
+  constructor() {
+    this.selected = /* @__PURE__ */ new Set();
+    this.anchorPath = null;
+  }
+  get anchor() {
+    return this.anchorPath;
+  }
+  get size() {
+    return this.selected.size;
+  }
+  has(path) {
+    return this.selected.has(path);
+  }
+  values() {
+    return Array.from(this.selected);
+  }
+  selectOnly(path) {
+    this.selected.clear();
+    this.selected.add(path);
+    this.anchorPath = path;
+  }
+  /** 普通单击/Ctrl 单击：不进入多选，只把锚点移到该行 */
+  setAnchorOnly(path) {
+    this.selected.clear();
+    this.anchorPath = path;
+  }
+  toggle(path) {
+    if (this.selected.has(path))
+      this.selected.delete(path);
+    else
+      this.selected.add(path);
+    this.anchorPath = path;
+  }
+  selectRange(paths) {
+    this.selected = new Set(paths);
+  }
+  set(paths) {
+    this.selected = new Set(paths);
+  }
+  clear() {
+    this.selected.clear();
+    this.anchorPath = null;
+  }
+  /** 文件夹改名/移动后同步选中路径与锚点 */
+  remapPrefix(oldPath, newPath) {
+    const map = (path) => path === oldPath ? newPath : path.startsWith(oldPath + "/") ? newPath + path.slice(oldPath.length) : path;
+    this.selected = new Set(Array.from(this.selected, map));
+    if (this.anchorPath)
+      this.anchorPath = map(this.anchorPath);
+  }
+  prune(exists) {
+    for (const path of [...this.selected]) {
+      if (!exists(path))
+        this.selected.delete(path);
+    }
+    if (this.anchorPath && !exists(this.anchorPath))
+      this.anchorPath = null;
+  }
+};
+function selectAll(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const selection = window.getSelection();
+  if (!selection)
+    return;
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+function startInlineRename(rowSelf, options) {
+  var _a;
+  const inner = rowSelf.querySelector(":scope > .tree-item-inner");
+  if (!inner || rowSelf.classList.contains("is-being-renamed"))
+    return;
+  const original = (_a = inner.textContent) != null ? _a : options.initialText;
+  let done = false;
+  let busy = false;
+  let composing = false;
+  rowSelf.classList.add("is-being-renamed", "has-focus");
+  inner.setAttribute("contenteditable", "true");
+  inner.setAttribute("spellcheck", "true");
+  inner.textContent = options.initialText;
+  const readText = () => {
+    var _a2;
+    return ((_a2 = inner.textContent) != null ? _a2 : "").replace(/\r?\n/g, " ").trim();
+  };
+  const teardown = (restore) => {
+    if (done)
+      return;
+    done = true;
+    inner.removeEventListener("keydown", onKeyDown);
+    inner.removeEventListener("blur", onBlur);
+    inner.removeEventListener("compositionstart", onCompositionStart);
+    inner.removeEventListener("compositionend", onCompositionEnd);
+    inner.removeEventListener("paste", onPaste);
+    rowSelf.classList.remove("is-being-renamed");
+    inner.removeAttribute("contenteditable");
+    inner.removeAttribute("spellcheck");
+    if (restore !== void 0)
+      inner.textContent = restore;
+  };
+  const finish = async (cancel, keepFocus) => {
+    if (done || busy)
+      return;
+    busy = true;
+    if (cancel) {
+      teardown(original);
+      options.finish(keepFocus);
+      return;
+    }
+    const accepted = await options.commit(readText());
+    busy = false;
+    if (accepted) {
+      teardown();
+      options.finish(keepFocus);
+      return;
+    }
+    inner.focus();
+    selectAll(inner);
+  };
+  const onKeyDown = (event) => {
+    if (event.key === "Enter") {
+      if (composing || event.isComposing || event.keyCode === 229)
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      void finish(false, true);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      void finish(true, true);
+    }
+  };
+  const onBlur = () => {
+    if (done || busy)
+      return;
+    void finish(false, false);
+  };
+  const onCompositionStart = () => {
+    composing = true;
+  };
+  const onCompositionEnd = () => {
+    composing = false;
+  };
+  const onPaste = (event) => {
+    var _a2, _b;
+    event.preventDefault();
+    const text = ((_b = (_a2 = event.clipboardData) == null ? void 0 : _a2.getData("text/plain")) != null ? _b : "").replace(
+      /\r?\n/g,
+      " "
+    );
+    if (!text)
+      return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0)
+      return;
+    selection.deleteFromDocument();
+    selection.getRangeAt(0).insertNode(document.createTextNode(text));
+    selection.collapseToEnd();
+  };
+  inner.addEventListener("keydown", onKeyDown);
+  inner.addEventListener("blur", onBlur);
+  inner.addEventListener("compositionstart", onCompositionStart);
+  inner.addEventListener("compositionend", onCompositionEnd);
+  inner.addEventListener("paste", onPaste);
+  inner.focus();
+  selectAll(inner);
+}
+
+// src/tree/tree-menu.ts
+var import_obsidian10 = require("obsidian");
+
+// src/system.ts
+var import_obsidian9 = require("obsidian");
 var electronShell = () => {
   var _a, _b;
   const req = window.require;
@@ -1675,7 +3014,7 @@ var electronShell = () => {
 };
 var absolutePath = (app, vaultPath) => {
   const adapter = app.vault.adapter;
-  return adapter instanceof import_obsidian6.FileSystemAdapter ? adapter.getFullPath(vaultPath) : null;
+  return adapter instanceof import_obsidian9.FileSystemAdapter ? adapter.getFullPath(vaultPath) : null;
 };
 var revealInSystem = (app, vaultPath, mode) => {
   const full = absolutePath(app, vaultPath);
@@ -1690,10 +3029,341 @@ var revealInSystem = (app, vaultPath, mode) => {
   return true;
 };
 
+// src/tree/tree-menu.ts
+var MenuBuilder = class {
+  constructor(menu, sectionNames) {
+    this.menu = menu;
+    this.lastSection = null;
+    const addSections = menu.addSections;
+    this.sections = typeof addSections === "function";
+    if (this.sections)
+      addSections.call(menu, sectionNames);
+  }
+  item(section, title, icon, onClick, warning = false) {
+    if (!this.sections && this.lastSection !== null && this.lastSection !== section) {
+      this.menu.addSeparator();
+    }
+    this.lastSection = section;
+    this.menu.addItem((entry) => {
+      if (this.sections)
+        entry.setSection(section);
+      entry.setTitle(title).setIcon(icon).onClick(onClick);
+      if (warning)
+        entry.setWarning(true);
+    });
+  }
+  /** 之后插入的是不带 section 的条目（本插件置顶/隐藏/排序，或第三方项） */
+  externalGroup() {
+    if (!this.sections && this.lastSection !== null)
+      this.menu.addSeparator();
+    this.lastSection = "";
+  }
+};
+async function copyPath(path) {
+  try {
+    await navigator.clipboard.writeText(path);
+    new import_obsidian10.Notice("\u5DF2\u590D\u5236\u8DEF\u5F84");
+  } catch (e) {
+    new import_obsidian10.Notice("\u590D\u5236\u8DEF\u5F84\u5931\u8D25");
+  }
+}
+function reveal(host, file) {
+  if (!revealInSystem(host.app, file.path, "reveal")) {
+    new import_obsidian10.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u5728\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u6253\u5F00");
+  }
+}
+async function openInNewTab(app, file) {
+  await app.workspace.getLeaf("tab").openFile(file);
+}
+async function openInNewTabGroup(app, file) {
+  await app.workspace.getLeaf("split").openFile(file);
+}
+async function openInNewWindow(app, file) {
+  var _a, _b, _c;
+  try {
+    const leaf = (_b = (_a = app.workspace).openPopoutLeaf) == null ? void 0 : _b.call(_a);
+    if (!leaf) {
+      new import_obsidian10.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u5728\u65B0\u7A97\u53E3\u4E2D\u6253\u5F00");
+      return;
+    }
+    await leaf.openFile(file);
+  } catch (err) {
+    new import_obsidian10.Notice(`\u65E0\u6CD5\u5728\u65B0\u7A97\u53E3\u4E2D\u6253\u5F00\uFF1A${String((_c = err == null ? void 0 : err.message) != null ? _c : err)}`);
+  }
+}
+async function openWithDefaultApp(app, file) {
+  var _a;
+  const open = app.openWithDefaultApp;
+  if (typeof open !== "function") {
+    new import_obsidian10.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u4F7F\u7528\u9ED8\u8BA4\u5E94\u7528\u6253\u5F00");
+    return;
+  }
+  try {
+    await open.call(app, file.path);
+  } catch (err) {
+    new import_obsidian10.Notice(`\u65E0\u6CD5\u4F7F\u7528\u9ED8\u8BA4\u5E94\u7528\u6253\u5F00\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+  }
+}
+async function duplicate(app, file) {
+  var _a;
+  try {
+    const extension = file instanceof import_obsidian10.TFile ? file.extension : "";
+    const base = extension ? file.path.slice(0, -(extension.length + 1)) : file.path;
+    const available = app.vault.getAvailablePath;
+    const newPath = typeof available === "function" ? available.call(app.vault, base, extension) : file.path + " 1";
+    await app.vault.copy(file, newPath);
+    new import_obsidian10.Notice(`\u5DF2\u521B\u5EFA\u526F\u672C\uFF1A${newPath}`);
+  } catch (err) {
+    new import_obsidian10.Notice(`\u521B\u5EFA\u526F\u672C\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+  }
+}
+function searchInFolder(app, folder) {
+  var _a, _b, _c;
+  const instance = (_c = (_b = (_a = app.internalPlugins) == null ? void 0 : _a.getPluginById) == null ? void 0 : _b.call(_a, "global-search")) == null ? void 0 : _c.instance;
+  if (typeof (instance == null ? void 0 : instance.openGlobalSearch) === "function") {
+    instance.openGlobalSearch(`path:"${folder.path}/" `);
+    return;
+  }
+  new import_obsidian10.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u5728\u6587\u4EF6\u5939\u4E2D\u67E5\u627E");
+}
+function collectFolders(root, exclude) {
+  const out = [root];
+  const walk = (folder) => {
+    for (const child of folder.children) {
+      if (!(child instanceof import_obsidian10.TFolder))
+        continue;
+      if (exclude && (child.path === exclude.path || child.path.startsWith(exclude.path + "/"))) {
+        continue;
+      }
+      out.push(child);
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
+}
+function nextAvailablePath(app, path, extension = "") {
+  const existing = app.vault.getAbstractFileByPath(path);
+  if (!existing)
+    return path;
+  const available = app.vault.getAvailablePath;
+  if (typeof available !== "function")
+    return path;
+  const base = extension ? path.slice(0, -(extension.length + 1)) : path;
+  return available.call(app.vault, base, extension);
+}
+async function moveFiles(app, files, target) {
+  var _a;
+  for (const file of files) {
+    if (!app.vault.getAbstractFileByPath(file.path))
+      continue;
+    const wanted = target.path === "/" ? file.name : `${target.path}/${file.name}`;
+    if (file.path === wanted)
+      continue;
+    const extension = file instanceof import_obsidian10.TFile ? file.extension : "";
+    const newPath = nextAvailablePath(app, wanted, extension);
+    if (newPath === file.path)
+      continue;
+    if (app.vault.getAbstractFileByPath(newPath)) {
+      new import_obsidian10.Notice(`\u5DF2\u5B58\u5728\uFF1A${newPath}`);
+      continue;
+    }
+    try {
+      await app.fileManager.renameFile(file, newPath);
+    } catch (err) {
+      new import_obsidian10.Notice(`\u79FB\u52A8\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+    }
+  }
+}
+var FolderPickerModal = class extends import_obsidian10.FuzzySuggestModal {
+  constructor(app, folders, rootPath, onPick) {
+    super(app);
+    this.folders = folders;
+    this.rootPath = rootPath;
+    this.onPick = onPick;
+    this.setPlaceholder("\u9009\u62E9\u76EE\u6807\u6587\u4EF6\u5939");
+  }
+  getItems() {
+    return this.folders;
+  }
+  getItemText(folder) {
+    if (folder.path === this.rootPath)
+      return `${folder.name}\uFF08\u5E93\u6839\uFF09`;
+    const prefix = this.rootPath === "/" ? "" : this.rootPath + "/";
+    return folder.path.startsWith(prefix) ? folder.path.slice(prefix.length) : folder.path;
+  }
+  onChooseItem(folder) {
+    this.onPick(folder);
+  }
+};
+function pickFolder(host, files, anchor) {
+  const root = host.app.vault.getAbstractFileByPath(host.scopeRootPath);
+  if (!(root instanceof import_obsidian10.TFolder))
+    return;
+  const exclude = anchor instanceof import_obsidian10.TFolder ? anchor : void 0;
+  const folders = collectFolders(root, exclude);
+  new FolderPickerModal(host.app, folders, root.path, (target) => {
+    void moveFiles(host.app, files, target).then(() => host.refresh());
+  }).open();
+}
+function showFileContextMenu(host, file, event) {
+  const menu = new import_obsidian10.Menu();
+  const builder = new MenuBuilder(menu, [
+    "title",
+    "open",
+    "action-primary",
+    "action",
+    "info",
+    "info.copy",
+    "view",
+    "system",
+    "",
+    "danger"
+  ]);
+  builder.item(
+    "open",
+    "\u5728\u65B0\u6807\u7B7E\u9875\u4E2D\u6253\u5F00",
+    "file-plus",
+    () => void openInNewTab(host.app, file)
+  );
+  builder.item(
+    "open",
+    "\u5728\u65B0\u6807\u7B7E\u7EC4\u4E2D\u6253\u5F00",
+    "separator-vertical",
+    () => void openInNewTabGroup(host.app, file)
+  );
+  builder.item(
+    "open",
+    "\u5728\u65B0\u7A97\u53E3\u4E2D\u6253\u5F00",
+    "picture-in-picture-2",
+    () => void openInNewWindow(host.app, file)
+  );
+  builder.item("action", "\u521B\u5EFA\u526F\u672C", "files", () => void duplicate(host.app, file));
+  builder.item(
+    "action",
+    "\u5C06\u6587\u4EF6\u79FB\u52A8\u5230\u2026",
+    "folder-tree",
+    () => pickFolder(host, [file], file)
+  );
+  builder.item("info", "\u590D\u5236\u8DEF\u5F84", "clipboard", () => void copyPath(file.path));
+  builder.item(
+    "system",
+    "\u4F7F\u7528\u9ED8\u8BA4\u5E94\u7528\u6253\u5F00",
+    "arrow-up-right",
+    () => void openWithDefaultApp(host.app, file)
+  );
+  builder.item(
+    "system",
+    "\u5728\u7CFB\u7EDF\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u663E\u793A",
+    "arrow-up-right",
+    () => reveal(host, file)
+  );
+  builder.externalGroup();
+  host.addPluginItems(menu, file);
+  builder.item("danger", "\u91CD\u547D\u540D", "edit-3", () => host.beginRename(file));
+  builder.item("danger", "\u5220\u9664", "trash-2", () => host.deleteFiles([file]), true);
+  menu.showAtMouseEvent(event);
+}
+function showFolderContextMenu(host, folder, event) {
+  const menu = new import_obsidian10.Menu();
+  const builder = new MenuBuilder(menu, [
+    "title",
+    "action-primary",
+    "action",
+    "info",
+    "view",
+    "system",
+    "",
+    "danger"
+  ]);
+  builder.item("action-primary", "\u65B0\u5EFA\u7B14\u8BB0", "edit", () => host.createNote(folder));
+  builder.item(
+    "action-primary",
+    "\u65B0\u5EFA\u6587\u4EF6\u5939",
+    "folder-open",
+    () => host.createFolder(folder)
+  );
+  builder.item("action", "\u521B\u5EFA\u526F\u672C", "files", () => void duplicate(host.app, folder));
+  builder.item(
+    "action",
+    "\u5C06\u6587\u4EF6\u5939\u79FB\u52A8\u5230\u2026",
+    "folder-tree",
+    () => pickFolder(host, [folder], folder)
+  );
+  builder.item(
+    "action",
+    "\u5728\u6587\u4EF6\u5939\u4E2D\u67E5\u627E",
+    "folder-search",
+    () => searchInFolder(host.app, folder)
+  );
+  builder.item("info", "\u590D\u5236\u8DEF\u5F84", "clipboard", () => void copyPath(folder.path));
+  builder.item(
+    "system",
+    "\u5728\u7CFB\u7EDF\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u663E\u793A",
+    "arrow-up-right",
+    () => reveal(host, folder)
+  );
+  builder.externalGroup();
+  host.addPluginItems(menu, folder);
+  builder.item("danger", "\u91CD\u547D\u540D", "edit-3", () => host.beginRename(folder));
+  builder.item("danger", "\u5220\u9664", "trash-2", () => host.deleteFiles([folder]), true);
+  menu.showAtMouseEvent(event);
+}
+function showMultiContextMenu(host, target, event) {
+  const selected = host.selectedFiles();
+  if (selected.length < 2) {
+    if (target instanceof import_obsidian10.TFolder)
+      showFolderContextMenu(host, target, event);
+    else
+      showFileContextMenu(host, target, event);
+    return;
+  }
+  const menu = new import_obsidian10.Menu();
+  const builder = new MenuBuilder(menu, [
+    "title",
+    "action-primary",
+    "action",
+    "danger"
+  ]);
+  const count = selected.length;
+  const onlyFiles = selected.every((file) => file instanceof import_obsidian10.TFile);
+  builder.item("action-primary", `\u4F7F\u7528\u9009\u4E2D\u7684 ${count} \u4E2A\u5BF9\u8C61\u521B\u5EFA\u65B0\u6587\u4EF6\u5939`, "folder-plus", () => {
+    host.createFolderWithSelection(selected);
+  });
+  builder.item(
+    "action",
+    onlyFiles ? `\u5C06 ${count} \u4E2A\u6587\u4EF6\u79FB\u52A8\u5230\u2026` : `\u5C06 ${count} \u4E2A\u9879\u76EE\u79FB\u52A8\u5230\u2026`,
+    "folder-tree",
+    () => pickFolder(host, selected, target)
+  );
+  builder.item("danger", "\u5220\u9664", "trash-2", () => host.deleteFiles(selected), true);
+  menu.showAtMouseEvent(event);
+}
+function showBlankContextMenu(host, root, event) {
+  const menu = new import_obsidian10.Menu();
+  const builder = new MenuBuilder(menu, ["title", "action-primary", "action", ""]);
+  builder.item("action-primary", "\u65B0\u5EFA\u7B14\u8BB0", "edit", () => host.createNote(root));
+  builder.item(
+    "action-primary",
+    "\u65B0\u5EFA\u6587\u4EF6\u5939",
+    "folder-open",
+    () => host.createFolder(root)
+  );
+  builder.item(
+    "action",
+    "\u5728\u6587\u4EF6\u5939\u4E2D\u67E5\u627E",
+    "folder-search",
+    () => searchInFolder(host.app, root)
+  );
+  builder.externalGroup();
+  host.addSortOnly(menu, root);
+  menu.showAtMouseEvent(event);
+}
+
 // src/view-tree.ts
 var VIEW_TYPE_KB_TREE = "kb-tree-view";
-var EXPAND_DELAY_MS = 1e3;
-var KbTreeView = class extends import_obsidian7.ItemView {
+var INVALID_NAME = /[\\/:*?"<>|\u0000-\u001f]/;
+var KbTreeView = class extends import_obsidian11.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.currentPath = null;
@@ -1702,18 +3372,25 @@ var KbTreeView = class extends import_obsidian7.ItemView {
     this.autoReveal = true;
     /** 「自动定位」按钮的 DOM 引用，用于同步激活态 */
     this.autoRevealBtn = null;
-    /** 手动排序后的滚动恢复值：重绘会把树重建，先记住用户拖拽时所处的位置 */
-    this.pendingTreeScrollTop = null;
-    // ---------- 拖拽状态 ----------
-    /** 正在被拖拽的条目路径 */
-    this.dragPath = null;
-    /** 上一次命中的落点条目，用于清理指示样式 */
-    this.lastDropEl = null;
-    /** 当前落点类型 */
-    this.dropSide = "before";
-    /** 悬停待自动展开的文件夹（同原生：停在折叠文件夹上一会儿就展开） */
-    this.expandPath = null;
-    this.expandTimer = 0;
+    /** 拖拽落盘后短时间内的滚动锚点：让后续几次重绘都停在用户拖拽时的位置 */
+    this.scrollHoldTop = null;
+    this.scrollHoldUntil = 0;
+    this.surface = null;
+    this.dndController = null;
+    this.model = null;
+    this.renderer = null;
+    /** 拖拽悬停展开了文件夹：dragend 后要整窗重绘，修正占位条 */
+    this.dragExpanded = false;
+    /** 切换知识库时下一次渲染回到顶部；普通刷新保留当前视口 */
+    this.resetScrollOnNextRender = false;
+    // ---------- 选中、焦点与行内编辑 ----------
+    this.selection = new TreeSelection();
+    this.focusedPath = null;
+    /** 正在行内重命名的路径；此期间不重绘整棵树 */
+    this.editingPath = null;
+    /** 单库树获得焦点时激活的 keymap scope（F2 等被 Obsidian 全局键位先截获） */
+    this.keyScope = null;
+    this.keyScopePushed = false;
     // ---------- 点击手势保护 ----------
     /** 指针正按在本面板内；此期间不重建 DOM，见 render() */
     this.inGesture = false;
@@ -1759,6 +3436,17 @@ var KbTreeView = class extends import_obsidian7.ItemView {
     for (const type of ["click", "contextmenu", "dragend"]) {
       this.registerDomEvent(this.containerEl, type, () => this.endGesture());
     }
+    this.registerDomEvent(
+      this.containerEl,
+      "pointerdown",
+      (event) => this.handleTreePointerDown(event)
+    );
+    this.registerDomEvent(
+      this.containerEl,
+      "click",
+      (event) => this.handleTreeBackgroundClick(event)
+    );
+    this.setupKeyScope();
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.updateActiveHighlight();
@@ -1766,16 +3454,63 @@ var KbTreeView = class extends import_obsidian7.ItemView {
           this.revealActive();
       })
     );
+    this.setupDnd();
+  }
+  async onClose() {
+    var _a, _b;
+    this.editingPath = null;
+    this.selection.clear();
+    this.popTreeScope();
+    this.keyScope = null;
+    (_a = this.dndController) == null ? void 0 : _a.detach();
+    this.dndController = null;
+    this.surface = null;
+    (_b = this.renderer) == null ? void 0 : _b.destroy();
+    this.renderer = null;
+    this.model = null;
+  }
+  /** 装配与原生树同一套拖拽控制器；作用域/折叠/滚动差异由 Surface 提供 */
+  setupDnd() {
+    if (this.dndController)
+      return;
+    const feature = this.plugin.sortFeature;
+    if (!feature)
+      return;
+    this.surface = new KbTreeSurface(
+      {
+        getScopePath: () => this.currentPath,
+        getScrollEl: () => this.getTreeBody(),
+        isCollapsed: (path) => this.collapsed.has(path),
+        expandInPlace: (path) => this.expandInPlace(path),
+        selectedPaths: () => this.selectedVisiblePaths(),
+        captureScroll: () => this.captureScrollHold(),
+        refreshAfterDrop: () => this.refresh(),
+        restoreScroll: () => this.restoreScrollHold()
+      },
+      this.app,
+      feature.orderManager,
+      (path) => feature.ensureFolderSettings(path)
+    );
+    this.dndController = new TreeDndController({
+      app: this.app,
+      orderManager: feature.orderManager,
+      getSettings: () => this.plugin.settings.order,
+      getItemSettings: (path) => feature.getItemSettings(path),
+      resolveSource: (target) => {
+        var _a, _b;
+        return (_b = (_a = this.surface) == null ? void 0 : _a.resolveDragSource(target)) != null ? _b : null;
+      },
+      resolveTargetSurface: (active) => active
+    });
+    this.dndController.attach();
   }
   /**
    * 只更新高亮态，不重建 DOM。
    * 打开笔记后调用，保证树里当前笔记立即高亮，且不因 DOM 重建打断点击。
    */
   updateActiveHighlight() {
-    var _a;
-    const active = this.app.workspace.getActiveFile();
-    const activePath = (_a = active == null ? void 0 : active.path) != null ? _a : null;
-    this.containerEl.querySelectorAll(".kb-tree-body .nav-file-title").forEach((self) => self.toggleClass("is-active", self.dataset.path === activePath));
+    var _a, _b, _c;
+    (_c = this.renderer) == null ? void 0 : _c.updateActive((_b = (_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) != null ? _b : null);
   }
   /** 在树面板顶部自建一排工具按钮（位置与原生文件浏览器一致） */
   renderToolbar(parent) {
@@ -1784,17 +3519,16 @@ var KbTreeView = class extends import_obsidian7.ItemView {
       const btn = bar.createDiv({ cls: "clickable-icon nav-action-button" });
       btn.setAttribute("aria-label", title);
       btn.setAttribute("title", title);
-      (0, import_obsidian7.setIcon)(btn, icon);
+      (0, import_obsidian11.setIcon)(btn, icon);
       btn.onclick = (e) => onClick(e);
       return btn;
     };
     mk("file-plus", "\u65B0\u5EFA\u7B14\u8BB0", () => this.actionNewNote());
-    mk("folder-plus", "\u65B0\u5EFA\u6587\u4EF6\u5939", () => this.actionNewFolder());
-    mk("arrow-up-down", "\u6392\u5E8F\u65B9\u5F0F", (e) => this.showSortMenu(e));
+    mk("folder-plus", "\u65B0\u5EFA\u6587\u4EF6\u5939", () => void this.actionNewFolder());
     this.autoRevealBtn = mk("crosshair", "\u81EA\u52A8\u5B9A\u4F4D\u5F53\u524D\u7B14\u8BB0", () => this.toggleAutoReveal());
     this.autoRevealBtn.toggleClass("is-active", this.autoReveal);
     mk("chevrons-down-up", "\u6298\u53E0\u5168\u90E8 / \u5C55\u5F00\u5168\u90E8", () => this.toggleCollapseAll());
-    mk("refresh-cw", "\u5237\u65B0", () => this.render());
+    mk("refresh-cw", "\u5237\u65B0", () => this.refresh());
   }
   /** 同步「自动定位」按钮的激活态样式 */
   updateAutoRevealAction() {
@@ -1806,113 +3540,176 @@ var KbTreeView = class extends import_obsidian7.ItemView {
   showKb(path) {
     this.currentPath = path;
     this.collapsed.clear();
+    this.selection.clear();
+    this.focusedPath = null;
+    this.editingPath = null;
+    this.scrollHoldTop = null;
+    this.scrollHoldUntil = 0;
+    this.resetScrollOnNextRender = true;
     this.render();
   }
   /** 文件夹改名 / 移动后跟随新路径；当前库在旧路径之下时同步更新 */
   handlePathRenamed(oldPath, newPath) {
     if (!this.currentPath)
       return;
-    if (this.currentPath !== oldPath && !this.currentPath.startsWith(oldPath + "/"))
+    const remap = (path) => path === oldPath ? newPath : path.startsWith(oldPath + "/") ? newPath + path.slice(oldPath.length) : path;
+    this.selection.remapPrefix(oldPath, newPath);
+    if (this.focusedPath)
+      this.focusedPath = remap(this.focusedPath);
+    if (this.currentPath !== oldPath && !this.currentPath.startsWith(oldPath + "/")) {
       return;
-    this.currentPath = this.currentPath === oldPath ? newPath : newPath + this.currentPath.slice(oldPath.length);
+    }
+    this.currentPath = remap(this.currentPath);
     this.collapsed.clear();
+    if (this.editingPath) {
+      this.pendingRender = true;
+      return;
+    }
     this.render();
   }
   refresh() {
+    if (this.editingPath || this.inGesture) {
+      this.pendingRender = true;
+      return;
+    }
+    this.pruneSelection();
+    if (this.tryFastRefresh())
+      return;
     this.render();
+  }
+  /**
+   * 排序/置顶/隐藏/文件增删只让模型缓存失效并重绘当前窗口，
+   * 不重建 header 和整棵树，视口停在用户当前的位置。
+   */
+  tryFastRefresh() {
+    if (!this.renderer || !this.model || !this.currentPath)
+      return false;
+    if (!this.plugin.sortFeature)
+      return false;
+    const folder = this.app.vault.getAbstractFileByPath(this.currentPath);
+    if (!(folder instanceof import_obsidian11.TFolder))
+      return false;
+    this.model.invalidateAll();
+    this.renderer.render();
+    this.renderer.updateSelection((path) => this.selection.has(path));
+    this.renderer.updateFocus(this.focusedPath);
+    return true;
+  }
+  pruneSelection() {
+    this.selection.prune((path) => !!this.app.vault.getAbstractFileByPath(path));
+    if (this.focusedPath && !this.app.vault.getAbstractFileByPath(this.focusedPath)) {
+      this.focusedPath = null;
+    }
   }
   // ============================================================
   // 头部快捷操作
   // ============================================================
-  /** 在指定文件夹下按原生文件树的做法直接建笔记：不弹名字框，默认「未命名」并自动避让重名 */
-  async createNoteIn(folder) {
-    let name = "\u672A\u547D\u540D";
-    for (let i = 1; this.app.vault.getAbstractFileByPath(`${folder.path}/${name}.md`); i++) {
-      name = `\u672A\u547D\u540D ${i}`;
+  /** 新建笔记/文件夹的落点：原生工具条按当前活动笔记所在文件夹，库外则回库根 */
+  activeFolderForNew() {
+    const root = this.requireRootFolder();
+    if (!root)
+      return null;
+    const active = this.app.workspace.getActiveFile();
+    const parent = active == null ? void 0 : active.parent;
+    if (active && parent && (active.path === root.path || active.path.startsWith(root.path + "/")) && this.app.vault.getAbstractFileByPath(parent.path) instanceof import_obsidian11.TFolder) {
+      return parent;
     }
-    const file = await this.app.vault.create(`${folder.path}/${name}.md`, "");
+    return root;
+  }
+  untitledPath(folder, extension) {
+    const prefix = folder.path === "/" ? "" : folder.path + "/";
+    const available = this.app.vault.getAvailablePath;
+    if (typeof available === "function") {
+      return available.call(this.app.vault, `${prefix}\u672A\u547D\u540D`, extension);
+    }
+    const suffix = extension ? `.${extension}` : "";
+    let suffixIndex = 0;
+    let name = "\u672A\u547D\u540D";
+    while (this.app.vault.getAbstractFileByPath(`${prefix}${name}${suffix}`)) {
+      suffixIndex++;
+      name = `\u672A\u547D\u540D ${suffixIndex}`;
+    }
+    return `${prefix}${name}${suffix}`;
+  }
+  /** 在指定文件夹下按原生做法建笔记：默认「未命名」，随后直接打开 */
+  async createNoteIn(folder) {
+    var _a;
+    let file = null;
+    const fileManager = this.app.fileManager;
+    try {
+      if (typeof fileManager.createNewMarkdownFile === "function") {
+        const created = await fileManager.createNewMarkdownFile(folder);
+        if (created instanceof import_obsidian11.TFile)
+          file = created;
+      }
+    } catch (e) {
+    }
+    if (!file) {
+      try {
+        const created = await this.app.vault.create(this.untitledPath(folder, "md"), "");
+        if (created instanceof import_obsidian11.TFile)
+          file = created;
+      } catch (err) {
+        new import_obsidian11.Notice(`\u65B0\u5EFA\u7B14\u8BB0\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+        return;
+      }
+    }
+    if (!file)
+      return;
+    this.expandChainTo(folder.path);
+    this.refresh();
     await this.plugin.openNote(file);
   }
-  /** 新建笔记：在当前库根目录下建，或建到当前选中的文件夹 */
-  actionNewNote() {
-    const folder = this.requireRootFolder();
-    if (!folder)
-      return;
-    void this.createNoteIn(folder);
-  }
-  /** 新建文件夹：建在当前库根目录 */
-  actionNewFolder() {
-    const folder = this.requireRootFolder();
-    if (!folder)
-      return;
-    this.plugin.showInputModal("\u65B0\u5EFA\u6587\u4EF6\u5939", `\u5728\u300C${folder.name}\u300D\u4E0B\u65B0\u5EFA\u6587\u4EF6\u5939`, "", async (name) => {
-      if (!(name == null ? void 0 : name.trim()))
-        return;
-      const path = `${folder.path}/${name.trim()}`;
-      if (this.app.vault.getAbstractFileByPath(path)) {
-        new import_obsidian7.Notice(`\u5DF2\u5B58\u5728\uFF1A${path}`);
-        return;
-      }
-      await this.app.vault.createFolder(path);
-    });
-  }
-  /** 排序菜单（作用于整个库：库里每个文件夹的 sortOrder 都设成所选值） */
-  showSortMenu(evt) {
-    var _a, _b;
-    const root = this.requireRootFolder();
-    const engine = this.plugin.sortFeature;
-    if (!root || !engine)
-      return;
-    const current = engine.ensureFolderSettings(root.path).sortOrder;
-    const menu = new import_obsidian7.Menu();
-    for (const [label, order] of SORT_OPTIONS) {
-      menu.addItem(
-        (item) => item.setTitle(label).setIcon(order === current ? "check" : "arrow-up-down").onClick(() => this.applySortOrder(root, order))
-      );
-    }
-    const rect = (_b = (_a = evt.currentTarget) == null ? void 0 : _a.getBoundingClientRect) == null ? void 0 : _b.call(_a);
-    if (rect)
-      menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 });
-    else
-      menu.showAtMouseEvent(evt);
-  }
-  /**
-   * 把本库所有文件夹的排序方式统一设为 order。
-   * 切到「自定义顺序」前先把各文件夹当前显示顺序固化进 customOrder ——
-   * 否则顺序会跳回这个文件夹上一次手动排列的旧结果。
-   */
-  applySortOrder(root, order) {
+  /** 新建文件夹：默认「未命名」，随后进入行内重命名 */
+  async createFolderIn(folder, startRename = true) {
     var _a;
-    const engine = this.plugin.sortFeature;
-    if (!engine)
-      return;
-    const walk = (folder) => {
-      const settings = engine.ensureFolderSettings(folder.path);
-      if (order === "custom" && settings.sortOrder !== "custom") {
-        settings.customOrder = this.sortEntries(this.folderEntries(folder), folder.path).map(
-          (c) => c.name
-        );
+    let created = null;
+    const fileManager = this.app.fileManager;
+    try {
+      if (typeof fileManager.createNewFolder === "function") {
+        const result = await fileManager.createNewFolder(folder);
+        if (result instanceof import_obsidian11.TFolder)
+          created = result;
       }
-      settings.sortOrder = order;
-      for (const child of folder.children)
-        if (child instanceof import_obsidian7.TFolder)
-          walk(child);
-    };
-    walk(root);
-    void this.plugin.saveSettingsNow();
-    (_a = this.plugin.sortFeature) == null ? void 0 : _a.sortExplorer();
-    this.render();
+    } catch (e) {
+    }
+    if (!created) {
+      try {
+        created = await this.app.vault.createFolder(this.untitledPath(folder, ""));
+      } catch (err) {
+        new import_obsidian11.Notice(`\u65B0\u5EFA\u6587\u4EF6\u5939\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+        return null;
+      }
+    }
+    if (!created)
+      return null;
+    this.expandChainTo(folder.path);
+    this.refresh();
+    if (startRename)
+      this.beginRenameByPath(created.path);
+    return created;
+  }
+  actionNewNote() {
+    const folder = this.activeFolderForNew();
+    if (folder)
+      void this.createNoteIn(folder);
+  }
+  async actionNewFolder() {
+    const folder = this.activeFolderForNew();
+    if (folder)
+      await this.createFolderIn(folder);
   }
   /** 切换「自动定位当前笔记」 */
   toggleAutoReveal() {
     this.autoReveal = !this.autoReveal;
     this.updateAutoRevealAction();
-    new import_obsidian7.Notice(this.autoReveal ? "\u5DF2\u5F00\u542F\uFF1A\u81EA\u52A8\u5B9A\u4F4D\u5F53\u524D\u7B14\u8BB0" : "\u5DF2\u5173\u95ED\uFF1A\u81EA\u52A8\u5B9A\u4F4D\u5F53\u524D\u7B14\u8BB0");
+    new import_obsidian11.Notice(this.autoReveal ? "\u5DF2\u5F00\u542F\uFF1A\u81EA\u52A8\u5B9A\u4F4D\u5F53\u524D\u7B14\u8BB0" : "\u5DF2\u5173\u95ED\uFF1A\u81EA\u52A8\u5B9A\u4F4D\u5F53\u524D\u7B14\u8BB0");
     if (this.autoReveal)
       this.revealActive();
   }
   /** 展开当前活动笔记的所有父级文件夹 */
   revealActive() {
+    var _a, _b;
     const active = this.app.workspace.getActiveFile();
     if (!active || !this.currentPath)
       return;
@@ -1927,7 +3724,9 @@ var KbTreeView = class extends import_obsidian7.ItemView {
         changed = true;
     }
     if (changed)
-      this.render();
+      this.refresh();
+    (_a = this.renderer) == null ? void 0 : _a.updateActive(active.path);
+    (_b = this.renderer) == null ? void 0 : _b.scrollToPath(active.path);
   }
   /** 一键折叠全部 / 展开全部 */
   toggleCollapseAll() {
@@ -1937,7 +3736,7 @@ var KbTreeView = class extends import_obsidian7.ItemView {
     const allFolders = [];
     const walk = (f) => {
       for (const c of f.children) {
-        if (c instanceof import_obsidian7.TFolder) {
+        if (c instanceof import_obsidian11.TFolder) {
           allFolders.push(c);
           walk(c);
         }
@@ -1956,15 +3755,36 @@ var KbTreeView = class extends import_obsidian7.ItemView {
   /** 取当前知识库根文件夹；若未设置则提示 */
   requireRootFolder() {
     if (!this.currentPath) {
-      new import_obsidian7.Notice("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u77E5\u8BC6\u5E93");
+      new import_obsidian11.Notice("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u77E5\u8BC6\u5E93");
       return null;
     }
     const folder = this.app.vault.getAbstractFileByPath(this.currentPath);
-    if (!(folder instanceof import_obsidian7.TFolder)) {
-      new import_obsidian7.Notice("\u77E5\u8BC6\u5E93\u4E0D\u5B58\u5728");
+    if (!(folder instanceof import_obsidian11.TFolder)) {
+      new import_obsidian11.Notice("\u77E5\u8BC6\u5E93\u4E0D\u5B58\u5728");
       return null;
     }
     return folder;
+  }
+  getTreeBody() {
+    return this.containerEl.querySelector(".kb-tree-body");
+  }
+  /** 拖拽落点前记住视口；重绘后由 rebuild() 反复套用，避免自动定位把视口抢走 */
+  captureScrollHold() {
+    const body = this.getTreeBody();
+    if (!body)
+      return;
+    this.scrollHoldTop = body.scrollTop;
+    this.scrollHoldUntil = Date.now() + 800;
+  }
+  restoreScrollHold() {
+    const apply = () => {
+      const body = this.getTreeBody();
+      if (body && this.scrollHoldTop !== null)
+        body.scrollTop = this.scrollHoldTop;
+    };
+    apply();
+    window.requestAnimationFrame(apply);
+    window.setTimeout(apply, 80);
   }
   /**
    * 重绘入口。手势期间的重绘请求先记账，交由 endGesture() 在手势收尾时补做，
@@ -1981,12 +3801,24 @@ var KbTreeView = class extends import_obsidian7.ItemView {
   /** 手势收尾：补做被推迟的重绘 */
   endGesture() {
     this.inGesture = false;
+    if (this.dragExpanded) {
+      this.dragExpanded = false;
+      this.pendingRender = false;
+      this.rebuild();
+      return;
+    }
     if (!this.pendingRender)
       return;
     this.pendingRender = false;
     this.rebuild();
   }
   rebuild() {
+    var _a, _b, _c;
+    const previousTop = (_b = (_a = this.getTreeBody()) == null ? void 0 : _a.scrollTop) != null ? _b : 0;
+    (_c = this.renderer) == null ? void 0 : _c.destroy();
+    this.renderer = null;
+    this.model = null;
+    this.editingPath = null;
     const container = this.containerEl.children[1];
     container.empty();
     container.addClass("kb-tree-container");
@@ -1998,8 +3830,13 @@ var KbTreeView = class extends import_obsidian7.ItemView {
       return;
     }
     const folder = this.app.vault.getAbstractFileByPath(this.currentPath);
-    if (!(folder instanceof import_obsidian7.TFolder)) {
+    if (!(folder instanceof import_obsidian11.TFolder)) {
       container.createDiv({ cls: "kb-tree-empty", text: "\u77E5\u8BC6\u5E93\u4E0D\u5B58\u5728" });
+      return;
+    }
+    const feature = this.plugin.sortFeature;
+    if (!feature) {
+      container.createDiv({ cls: "kb-tree-empty", text: "\u6392\u5E8F\u529F\u80FD\u672A\u5C31\u7EEA" });
       return;
     }
     const host = container.createDiv({ cls: "kb-tree-host" });
@@ -2007,529 +3844,594 @@ var KbTreeView = class extends import_obsidian7.ItemView {
     const back = header.createEl("span", { cls: "kb-tree-back", text: "\u2190 \u5168\u90E8\u77E5\u8BC6\u5E93" });
     back.onclick = () => void this.plugin.openKbHome();
     const titleRow = header.createDiv({ cls: "kb-tree-title-row" });
-    const title = titleRow.createEl("div", { cls: "kb-tree-title", text: folder.name });
-    title.dataset.path = folder.path;
-    title.setAttr("title", `\u62D6\u5230\u8FD9\u91CC \u2192 \u79FB\u56DE\u300C${folder.name}\u300D\u6839\u76EE\u5F55`);
+    titleRow.createEl("div", { cls: "kb-tree-title", text: folder.name });
     this.renderToolbar(titleRow);
     const tree = host.createDiv({ cls: "kb-tree-body nav-files-container" });
-    this.attachTreeDrag(host);
-    this.renderChildren(tree, folder);
-    if (this.pendingTreeScrollTop !== null) {
-      const top = this.pendingTreeScrollTop;
-      this.pendingTreeScrollTop = null;
-      tree.scrollTop = top;
-      window.requestAnimationFrame(() => {
-        if (tree.isConnected)
-          tree.scrollTop = top;
-      });
-    }
-    tree.addEventListener("contextmenu", (e) => {
-      if (e.target === tree) {
-        e.preventDefault();
-        this.showFolderMenu(e, folder);
+    tree.tabIndex = 0;
+    const model = new TreeModel({
+      app: this.app,
+      orderManager: feature.orderManager,
+      getSettings: () => this.plugin.settings.order,
+      getFolderSettings: (path) => feature.ensureFolderSettings(path),
+      isHiddenByRule: (path) => this.plugin.isHiddenByRule(path),
+      isCollapsed: (path) => this.collapsed.has(path),
+      getActivePath: () => {
+        var _a2, _b2;
+        return (_b2 = (_a2 = this.app.workspace.getActiveFile()) == null ? void 0 : _a2.path) != null ? _b2 : null;
       }
     });
+    model.setRootPath(this.currentPath);
+    const renderer = new KbTreeRenderer(tree, model, {
+      getActivePath: () => {
+        var _a2, _b2;
+        return (_b2 = (_a2 = this.app.workspace.getActiveFile()) == null ? void 0 : _a2.path) != null ? _b2 : null;
+      },
+      getDraggingPath: () => {
+        var _a2, _b2, _c2;
+        return (_c2 = (_b2 = (_a2 = this.dndController) == null ? void 0 : _a2.draggedItem) == null ? void 0 : _b2.path) != null ? _c2 : null;
+      },
+      getFocusedPath: () => this.focusedPath,
+      isSelected: (path) => this.selection.has(path),
+      isCollapsed: (path) => this.collapsed.has(path),
+      onFileClick: (file, event) => this.handleFileClick(file, event),
+      onFileAuxClick: (file, event) => {
+        event.preventDefault();
+        void this.app.workspace.getLeaf("tab").openFile(file);
+      },
+      onFolderClick: (target, event) => this.handleFolderClick(target, event),
+      onFileContextMenu: (file, event) => this.handleFileContextMenu(file, event),
+      onFolderContextMenu: (target, event) => this.handleFolderContextMenu(target, event)
+    });
+    this.model = model;
+    this.renderer = renderer;
+    const holdActive = this.scrollHoldTop !== null && Date.now() < this.scrollHoldUntil;
+    const top = this.resetScrollOnNextRender ? 0 : holdActive ? this.scrollHoldTop : previousTop;
+    this.resetScrollOnNextRender = false;
+    renderer.render(top);
+    renderer.updateSelection((path) => this.selection.has(path));
+    renderer.updateFocus(this.focusedPath);
+    tree.addEventListener("contextmenu", (e) => {
+      const target = e.target;
+      if (!target || target.closest(".tree-item-self"))
+        return;
+      e.preventDefault();
+      const menuHost = this.menuHost();
+      if (menuHost)
+        showBlankContextMenu(menuHost, folder, e);
+    });
   }
-  /** 是否置顶（与原生文件浏览器共用 order.items[path].isPinned 这一个标记） */
-  isPinned(path) {
+  // ============================================================
+  // 点击、选中与键盘
+  // ============================================================
+  /** 文件行单击：与原生一致，Alt 选中、Shift 范围、Ctrl/Cmd 开新标签 */
+  handleFileClick(file, event) {
     var _a;
-    return !!((_a = this.plugin.settings.order.items[path]) == null ? void 0 : _a.isPinned);
-  }
-  /** 置顶图钉：与原生树右侧那枚同一个结构、同一份 CSS */
-  mountPin(rowSelf, path) {
-    if (!this.isPinned(path))
+    this.setFocusedPath(file.path);
+    if (event.altKey) {
+      this.selection.toggle(file.path);
+      this.updateSelectionView();
       return;
-    const indicator = rowSelf.createDiv({ cls: "kb-indicator" });
-    (0, import_obsidian7.setIcon)(indicator.createDiv({ cls: "kb-pin-indicator" }), "pin");
+    }
+    if (event.shiftKey) {
+      this.extendSelection(file.path);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      this.selection.setAnchorOnly(file.path);
+      this.updateSelectionView();
+      void this.app.workspace.getLeaf("tab").openFile(file);
+      return;
+    }
+    this.selection.setAnchorOnly(file.path);
+    this.updateSelectionView();
+    if (((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) === file.path)
+      return;
+    void this.plugin.openNote(file);
   }
-  /** 某文件夹下参与树展示的直接子项：只含文件夹与 .md（隐藏项照样渲染，靠 .kb-hidden 控制显隐） */
-  folderEntries(folder) {
-    return folder.children.filter(
-      (c) => c instanceof import_obsidian7.TFolder || c instanceof import_obsidian7.TFile && c.extension === "md"
+  /** 文件夹行单击：Alt/Shift 只选中，不折叠；普通点击切换折叠 */
+  handleFolderClick(folder, event) {
+    this.setFocusedPath(folder.path);
+    if (event.altKey) {
+      this.selection.toggle(folder.path);
+      this.updateSelectionView();
+      return;
+    }
+    if (event.shiftKey) {
+      this.extendSelection(folder.path);
+      return;
+    }
+    this.selection.setAnchorOnly(folder.path);
+    this.updateSelectionView();
+    this.toggleFolder(folder.path);
+  }
+  handleFileContextMenu(file, event) {
+    this.setFocusedPath(file.path);
+    const menuHost = this.menuHost();
+    if (!menuHost)
+      return;
+    if (this.selection.size > 1 && this.selection.has(file.path)) {
+      showMultiContextMenu(menuHost, file, event);
+    } else {
+      showFileContextMenu(menuHost, file, event);
+    }
+  }
+  handleFolderContextMenu(folder, event) {
+    this.setFocusedPath(folder.path);
+    const menuHost = this.menuHost();
+    if (!menuHost)
+      return;
+    if (this.selection.size > 1 && this.selection.has(folder.path)) {
+      showMultiContextMenu(menuHost, folder, event);
+    } else {
+      showFolderContextMenu(menuHost, folder, event);
+    }
+  }
+  extendSelection(path) {
+    var _a;
+    const anchor = this.selection.anchor;
+    if (!anchor) {
+      this.selection.selectOnly(path);
+      this.updateSelectionView();
+      return;
+    }
+    const range = (_a = this.renderer) == null ? void 0 : _a.pathsInRange(anchor, path);
+    if (range)
+      this.selection.selectRange(range);
+    else
+      this.selection.selectOnly(path);
+    this.updateSelectionView();
+  }
+  clearSelection() {
+    this.selection.clear();
+    this.updateSelectionView();
+  }
+  updateSelectionView() {
+    var _a;
+    (_a = this.renderer) == null ? void 0 : _a.updateSelection((path) => this.selection.has(path));
+  }
+  selectedVisiblePaths() {
+    const renderer = this.renderer;
+    if (!renderer)
+      return this.selection.values();
+    const out = [];
+    for (let i = 0; i < renderer.visibleCount; i++) {
+      const path = renderer.pathAt(i);
+      if (path && this.selection.has(path))
+        out.push(path);
+    }
+    return out;
+  }
+  /** 选中的文件/文件夹，去掉已被选中文件夹包含的子项 */
+  resolveSelectedFiles() {
+    const vault = this.app.vault;
+    const files = this.selection.values().map((path) => vault.getAbstractFileByPath(path)).filter((file) => !!file);
+    return files.filter(
+      (file) => !files.some(
+        (candidate) => candidate instanceof import_obsidian11.TFolder && candidate.path !== file.path && file.path.startsWith(candidate.path + "/")
+      )
     );
   }
+  setFocusedPath(path, scroll = false) {
+    var _a, _b, _c, _d;
+    this.focusedPath = path;
+    if (path && scroll)
+      (_a = this.renderer) == null ? void 0 : _a.scrollToPath(path);
+    (_b = this.renderer) == null ? void 0 : _b.updateFocus(path);
+    if (path)
+      (_d = (_c = this.renderer) == null ? void 0 : _c.rowSelf(path)) == null ? void 0 : _d.focus({ preventScroll: true });
+  }
+  handleTreePointerDown(event) {
+    const body = this.getTreeBody();
+    const target = event.target;
+    if (!body || !target || !body.contains(target))
+      return;
+    if (this.editingPath)
+      return;
+    if (target.closest(".tree-item-self"))
+      return;
+    body.focus({ preventScroll: true });
+  }
+  handleTreeBackgroundClick(event) {
+    const body = this.getTreeBody();
+    const target = event.target;
+    if (!body || !target || !body.contains(target))
+      return;
+    if (target.closest(".tree-item-self"))
+      return;
+    if (this.editingPath)
+      return;
+    this.clearSelection();
+    body.focus({ preventScroll: true });
+  }
   /**
-   * 某文件夹下子项的显示顺序：直接调用与原生文件浏览器同一套排序器
-   * （OrderManager.getSortedItems：置顶优先 → 该文件夹自己的 sortOrder → customOrder）。
+   * F2 / 方向键等会先被 Obsidian 的全局 keymap 截获，不会冒泡到 DOM。
+   * 和原生文件浏览器一样：树获得焦点时压入自己的 scope，失焦时弹出。
    */
-  sortEntries(children, parentPath) {
-    const engine = this.plugin.sortFeature;
-    if (!engine)
-      return children.slice().sort((a, b) => a.name.localeCompare(b.name, "zh"));
-    return engine.orderManager.getSortedItems(engine.ensureFolderSettings(parentPath), children.map((file) => ({ file }))).map((i) => i.file);
-  }
-  renderChildren(parent, folder) {
-    const ordered = this.sortEntries(this.folderEntries(folder), folder.path);
-    for (const child of ordered) {
-      if (child instanceof import_obsidian7.TFolder) {
-        this.renderFolder(parent, child);
-      } else if (child instanceof import_obsidian7.TFile) {
-        this.renderFile(parent, child);
+  setupKeyScope() {
+    const keymap = this.app.keymap;
+    if (typeof (keymap == null ? void 0 : keymap.pushScope) === "function") {
+      const scope = new import_obsidian11.Scope();
+      for (const key of [
+        "ArrowDown",
+        "ArrowUp",
+        "ArrowLeft",
+        "ArrowRight",
+        "Home",
+        "End",
+        "Enter",
+        "F2",
+        "Delete",
+        "Escape"
+      ]) {
+        scope.register(null, key, (event) => this.handleTreeKey(event));
       }
-    }
-  }
-  renderFolder(parent, folder) {
-    const isCollapsed = this.collapsed.has(folder.path);
-    const item = parent.createDiv({ cls: "tree-item nav-folder" });
-    item.dataset.kind = "folder";
-    if (this.plugin.isHiddenByRule(folder.path))
-      item.addClass("kb-hidden");
-    const self = item.createDiv({
-      cls: "tree-item-self nav-folder-title is-clickable mod-collapsible"
-    });
-    self.dataset.path = folder.path;
-    self.setAttr("tabindex", "-1");
-    self.setAttribute("draggable", "true");
-    const collapse = self.createDiv({ cls: "tree-item-icon collapse-icon" });
-    (0, import_obsidian7.setIcon)(collapse, "right-triangle");
-    if (isCollapsed) {
-      item.addClass("is-collapsed");
-      collapse.addClass("is-collapsed");
-    }
-    self.createDiv({ cls: "tree-item-inner nav-folder-title-content", text: folder.name });
-    this.mountPin(self, folder.path);
-    self.onclick = () => {
-      if (isCollapsed)
-        this.collapsed.delete(folder.path);
-      else
-        this.collapsed.add(folder.path);
-      this.render();
-    };
-    self.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      this.showFolderMenu(e, folder);
-    });
-    if (!isCollapsed) {
-      const sub = item.createDiv({ cls: "tree-item-children nav-folder-children" });
-      this.renderChildren(sub, folder);
-    }
-  }
-  /** 文件行：与原生一致，只有文件名，不加图标 */
-  renderFile(parent, file) {
-    const item = parent.createDiv({ cls: "tree-item nav-file" });
-    item.dataset.kind = "file";
-    item.setAttribute("draggable", "true");
-    if (this.plugin.isHiddenByRule(file.path))
-      item.addClass("kb-hidden");
-    const self = item.createDiv({
-      cls: "tree-item-self nav-file-title tappable is-clickable"
-    });
-    self.dataset.path = file.path;
-    self.setAttr("tabindex", "-1");
-    self.setAttribute("draggable", "true");
-    self.createDiv({ cls: "tree-item-inner nav-file-title-content", text: file.basename });
-    this.mountPin(self, file.path);
-    const active = this.app.workspace.getActiveFile();
-    if (active && active.path === file.path)
-      self.addClass("is-active");
-    self.addEventListener("click", (e) => {
-      if (e.button !== 0)
-        return;
-      const f = this.app.vault.getAbstractFileByPath(file.path);
-      if (!(f instanceof import_obsidian7.TFile))
-        return;
-      if (e.ctrlKey || e.metaKey) {
-        void this.app.workspace.getLeaf("tab").openFile(f);
-        return;
-      }
-      void this.plugin.openNote(f);
-    });
-    self.addEventListener("auxclick", (e) => {
-      if (e.button !== 1)
-        return;
-      e.preventDefault();
-      const f = this.app.vault.getAbstractFileByPath(file.path);
-      if (f instanceof import_obsidian7.TFile)
-        void this.app.workspace.getLeaf("tab").openFile(f);
-    });
-    self.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      this.showFileMenu(e, file);
-    });
-  }
-  // ============================================================
-  // 拖拽排序
-  // ============================================================
-  /**
-   * 在整个树主体上挂一次拖拽监听（事件委托，重绘后无需重挂）。
-   * 指示属性与原生树共用同一套词汇（data-kb-drop-sibling / data-kb-drop-folder /
-   * is-being-dragged），所以两棵树的拖拽反馈长得一样，CSS 也只有一份。
-   */
-  attachTreeDrag(host) {
-    host.addEventListener("dragstart", (e) => {
-      const hit = this.findDropTarget(e.target);
-      if (!hit)
-        return;
-      this.dragPath = hit.path;
-      hit.self.addClass("is-being-dragged");
-      document.body.addClass("kb-dragging");
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", hit.path);
-      }
-    });
-    host.addEventListener("dragover", (e) => {
-      if (!this.dragPath)
-        return;
-      const hit = this.findDropTarget(e.target);
-      if (!hit)
-        return;
-      const path = hit.path;
-      if (path === this.dragPath)
-        return;
-      if (path.startsWith(this.dragPath + "/"))
-        return;
-      e.preventDefault();
-      if (e.dataTransfer)
-        e.dataTransfer.dropEffect = "move";
-      const side = this.resolveDropSide(e, hit);
-      this.markDropTarget(hit.item, side);
-      this.scheduleExpand(hit, side);
-    });
-    host.addEventListener("dragleave", (e) => {
-      if (!host.contains(e.relatedTarget))
-        this.clearDropMarks();
-    });
-    host.addEventListener("drop", (e) => {
-      const hit = this.findDropTarget(e.target);
-      const from = this.dragPath;
-      this.clearDropMarks();
-      this.cancelExpand();
-      if (!from || !hit)
-        return;
-      const toPath = hit.path;
-      if (toPath === from)
-        return;
-      if (toPath.startsWith(from + "/"))
-        return;
-      e.preventDefault();
-      void this.handleDrop(from, toPath, this.resolveDropSide(e, hit));
-    });
-    host.addEventListener("dragend", () => {
-      this.dragPath = null;
-      this.cancelExpand();
-      document.body.removeClass("kb-dragging");
-      host.querySelectorAll(".is-being-dragged").forEach(
-        (el) => el.removeClass("is-being-dragged")
+      this.keyScope = scope;
+      this.registerDomEvent(
+        this.containerEl,
+        "focusin",
+        (event) => this.handleTreeFocusIn(event)
       );
-      this.clearDropMarks();
+      this.registerDomEvent(
+        this.containerEl,
+        "focusout",
+        (event) => this.handleTreeFocusOut(event)
+      );
+      return;
+    }
+    this.registerDomEvent(this.containerEl, "keydown", (event) => {
+      this.handleTreeKey(event);
     });
   }
-  /** 命中落点：item = 挂指示属性的 .tree-item，self = 量位置的行，path 在 self 上（与原生一致） */
-  findDropTarget(target) {
+  handleTreeFocusIn(event) {
+    const body = this.getTreeBody();
+    const target = event.target;
+    if (!body || !target || !body.contains(target))
+      return;
+    if (this.editingPath)
+      return;
+    this.pushTreeScope();
+  }
+  handleTreeFocusOut(event) {
+    if (this.editingPath)
+      return;
+    const body = this.getTreeBody();
+    const next = event.relatedTarget;
+    if (body && next && body.contains(next))
+      return;
+    this.popTreeScope();
+  }
+  pushTreeScope() {
     var _a;
-    if (!(target instanceof HTMLElement))
-      return null;
-    const rootRow = target.closest(".kb-tree-title");
-    if (rootRow == null ? void 0 : rootRow.dataset.path)
-      return { item: rootRow, self: rootRow, path: rootRow.dataset.path, isRoot: true };
-    const self = (_a = target.closest(".tree-item-self")) != null ? _a : target.matches(".tree-item") ? target.querySelector(":scope > .tree-item-self") : null;
-    const item = self == null ? void 0 : self.closest(".tree-item");
-    if (!(self == null ? void 0 : self.dataset.path) || !item)
-      return null;
-    return { item, self, path: self.dataset.path, isRoot: false };
-  }
-  /**
-   * 判断落点类型（与原生一致）：
-   * - 库根标题行 → 移入库根
-   * - 落在文件夹行的上 1/4 / 下 1/4 → 排到该文件夹前 / 后
-   * - 落在文件夹行中间 → 移入该文件夹
-   * - 落在文件行的上/下半 → 排到该文件前 / 后
-   */
-  resolveDropSide(e, hit) {
-    if (hit.isRoot)
-      return "inside";
-    const rect = hit.self.getBoundingClientRect();
-    const ratio = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
-    if (hit.item.dataset.kind !== "folder")
-      return ratio < 0.5 ? "before" : "after";
-    if (ratio < 0.25)
-      return "before";
-    if (ratio > 0.75)
-      return "after";
-    return "inside";
-  }
-  /** 给落点加视觉指示（原生树那套：放置线 / 移入底色） */
-  markDropTarget(item, side) {
-    if (this.lastDropEl === item && this.dropSide === side)
+    if (!this.keyScope || this.keyScopePushed)
       return;
-    this.clearDropMarks();
-    this.lastDropEl = item;
-    this.dropSide = side;
-    if (side === "inside")
-      item.dataset.kbDropFolder = "";
+    (_a = this.app.keymap) == null ? void 0 : _a.pushScope(this.keyScope);
+    this.keyScopePushed = true;
+  }
+  popTreeScope() {
+    var _a;
+    if (!this.keyScope || !this.keyScopePushed)
+      return;
+    (_a = this.app.keymap) == null ? void 0 : _a.popScope(this.keyScope);
+    this.keyScopePushed = false;
+  }
+  handleTreeKey(event) {
+    var _a, _b;
+    if (this.editingPath)
+      return false;
+    const body = this.getTreeBody();
+    const renderer = this.renderer;
+    if (!body || !renderer)
+      return false;
+    const target = event.target;
+    if (!target || !body.contains(target) && target !== body)
+      return false;
+    if (event.ctrlKey || event.metaKey || event.altKey)
+      return false;
+    const activeRow = document.activeElement instanceof HTMLElement ? document.activeElement.closest(".tree-item-self[data-path]") : null;
+    const activePath = (_a = activeRow == null ? void 0 : activeRow.dataset.path) != null ? _a : null;
+    let current = activePath && renderer.indexOfPath(activePath) >= 0 ? activePath : this.focusedPath;
+    if (current && renderer.indexOfPath(current) < 0)
+      current = null;
+    const index = current ? renderer.indexOfPath(current) : -1;
+    const focusAt = (i) => {
+      const path = renderer.pathAt(i);
+      if (path)
+        this.setFocusedPath(path, true);
+    };
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        focusAt(index < 0 ? 0 : index + 1);
+        return true;
+      case "ArrowUp":
+        event.preventDefault();
+        focusAt(index < 0 ? 0 : index - 1);
+        return true;
+      case "Home":
+        event.preventDefault();
+        focusAt(0);
+        return true;
+      case "End":
+        event.preventDefault();
+        focusAt(renderer.visibleCount - 1);
+        return true;
+      case "ArrowLeft": {
+        if (!current)
+          return false;
+        event.preventDefault();
+        const entry = this.app.vault.getAbstractFileByPath(current);
+        if (entry instanceof import_obsidian11.TFolder) {
+          if (!this.collapsed.has(current)) {
+            this.toggleFolder(current);
+            this.setFocusedPath(current);
+            return true;
+          }
+          const parent = entry.parent;
+          if (parent && parent.path !== this.currentPath && renderer.indexOfPath(parent.path) >= 0) {
+            this.setFocusedPath(parent.path, true);
+          }
+        } else if ((entry == null ? void 0 : entry.parent) && entry.parent.path !== this.currentPath) {
+          this.setFocusedPath(entry.parent.path, true);
+        }
+        return true;
+      }
+      case "ArrowRight": {
+        if (!current)
+          return false;
+        event.preventDefault();
+        const entry = this.app.vault.getAbstractFileByPath(current);
+        if (!(entry instanceof import_obsidian11.TFolder))
+          return true;
+        if (this.collapsed.has(current)) {
+          this.toggleFolder(current);
+          this.setFocusedPath(current);
+          return true;
+        }
+        const nextPath = renderer.pathAt(index + 1);
+        if (nextPath && nextPath.startsWith(current + "/")) {
+          this.setFocusedPath(nextPath, true);
+        }
+        return true;
+      }
+      case "Enter": {
+        if (!current)
+          return false;
+        event.preventDefault();
+        const entry = this.app.vault.getAbstractFileByPath(current);
+        if (entry instanceof import_obsidian11.TFolder)
+          this.toggleFolder(current);
+        else if (entry instanceof import_obsidian11.TFile) {
+          if (((_b = this.app.workspace.getActiveFile()) == null ? void 0 : _b.path) !== entry.path) {
+            void this.plugin.openNote(entry);
+          }
+        }
+        return true;
+      }
+      case "F2":
+        if (!current)
+          return false;
+        event.preventDefault();
+        this.beginRenameByPath(current);
+        return true;
+      case "Delete": {
+        const files = this.selection.size > 0 ? this.resolveSelectedFiles() : current ? [this.app.vault.getAbstractFileByPath(current)].filter(
+          (file) => !!file
+        ) : [];
+        if (!files.length)
+          return false;
+        event.preventDefault();
+        void this.deleteFiles(files);
+        return true;
+      }
+      case "Escape":
+        if (this.selection.size === 0)
+          return false;
+        event.preventDefault();
+        this.clearSelection();
+        return true;
+      default:
+        return false;
+    }
+  }
+  menuHost() {
+    const feature = this.plugin.sortFeature;
+    if (!feature || !this.currentPath)
+      return null;
+    return {
+      app: this.app,
+      scopeRootPath: this.currentPath,
+      addPluginItems: (menu, file) => feature.addFileMenuItems(menu, file, () => this.refresh()),
+      addSortOnly: (menu, folder) => feature.addSortOnly(menu, folder, () => this.refresh()),
+      refresh: () => this.refresh(),
+      beginRename: (file) => this.beginRenameByPath(file.path),
+      createNote: (folder) => void this.createNoteIn(folder),
+      createFolder: (folder) => void this.createFolderIn(folder),
+      createFolderWithSelection: (files) => void this.createFolderWithSelection(files),
+      deleteFiles: (files) => void this.deleteFiles(files),
+      selectedFiles: () => this.resolveSelectedFiles(),
+      clearSelection: () => this.clearSelection()
+    };
+  }
+  toggleFolder(path) {
+    var _a, _b, _c;
+    if (this.collapsed.has(path))
+      this.collapsed.delete(path);
     else
-      item.dataset.kbDropSibling = side;
+      this.collapsed.add(path);
+    (_a = this.renderer) == null ? void 0 : _a.render();
+    (_b = this.renderer) == null ? void 0 : _b.updateSelection((p) => this.selection.has(p));
+    (_c = this.renderer) == null ? void 0 : _c.updateFocus(this.focusedPath);
   }
-  clearDropMarks() {
-    this.containerEl.querySelectorAll("[data-kb-drop-sibling],[data-kb-drop-folder]").forEach((el) => {
-      delete el.dataset.kbDropSibling;
-      delete el.dataset.kbDropFolder;
+  // ============================================================
+  // 行内重命名 / 新建 / 删除
+  // ============================================================
+  beginRenameByPath(path) {
+    var _a, _b;
+    if (this.editingPath)
+      return;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file)
+      return;
+    (_a = this.renderer) == null ? void 0 : _a.scrollToPath(path);
+    const row = (_b = this.renderer) == null ? void 0 : _b.rowSelf(path);
+    if (!row)
+      return;
+    this.setFocusedPath(path);
+    this.editingPath = path;
+    this.popTreeScope();
+    const initial = file instanceof import_obsidian11.TFile ? file.basename : file.name;
+    startInlineRename(row, {
+      initialText: initial,
+      commit: (text) => this.commitRename(file, text),
+      finish: (keepFocus) => this.finishEditing(keepFocus)
     });
-    this.lastDropEl = null;
   }
-  /** 悬停在折叠文件夹正中 → 停一会儿自动展开，好把条目拖进更深层（同原生） */
-  scheduleExpand(hit, side) {
-    const path = side === "inside" && !hit.isRoot ? hit.path : null;
-    if (path === this.expandPath)
+  async commitRename(file, text) {
+    var _a;
+    const name = text.trim();
+    if (!name) {
+      new import_obsidian11.Notice("\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+      return false;
+    }
+    if (INVALID_NAME.test(name)) {
+      new import_obsidian11.Notice('\u540D\u79F0\u4E0D\u80FD\u5305\u542B \\ / : * ? " < > | \u7B49\u5B57\u7B26');
+      return false;
+    }
+    const parent = file.parent;
+    if (!parent)
+      return false;
+    const oldPath = file.path;
+    const oldName = file instanceof import_obsidian11.TFile ? file.basename : file.name;
+    if (name === oldName)
+      return true;
+    let targetName = name;
+    if (file instanceof import_obsidian11.TFile && file.extension) {
+      const suffix = "." + file.extension;
+      const base = name.toLowerCase().endsWith(suffix.toLowerCase()) ? name.slice(0, -suffix.length) : name;
+      if (!base) {
+        new import_obsidian11.Notice("\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+        return false;
+      }
+      targetName = `${base}.${file.extension}`;
+    }
+    const newPath = parent.path === "/" ? targetName : `${parent.path}/${targetName}`;
+    const existing = this.app.vault.getAbstractFileByPath(newPath);
+    if (existing && existing !== file) {
+      new import_obsidian11.Notice(`\u5DF2\u5B58\u5728\uFF1A${newPath}`);
+      return false;
+    }
+    try {
+      await this.app.fileManager.renameFile(file, newPath);
+    } catch (err) {
+      new import_obsidian11.Notice(`\u91CD\u547D\u540D\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+      return false;
+    }
+    this.selection.remapPrefix(oldPath, newPath);
+    if (this.focusedPath === oldPath)
+      this.focusedPath = newPath;
+    return true;
+  }
+  finishEditing(keepFocus) {
+    const pending = this.pendingRender;
+    this.editingPath = null;
+    this.pendingRender = false;
+    if (pending)
+      this.render();
+    else
+      this.refresh();
+    if (keepFocus)
+      this.setFocusedPath(this.focusedPath, true);
+  }
+  expandChainTo(path) {
+    const root = this.currentPath;
+    if (!root)
       return;
-    this.cancelExpand();
-    this.expandPath = path;
-    if (!path || !this.collapsed.has(path))
+    this.collapsed.delete(root);
+    if (path === root)
       return;
-    this.expandTimer = window.setTimeout(() => {
-      this.expandPath = null;
-      this.expandInPlace(path);
-    }, EXPAND_DELAY_MS);
+    if (!path.startsWith(root + "/"))
+      return;
+    let acc = root;
+    for (const part of path.slice(root.length + 1).split("/")) {
+      acc = `${acc}/${part}`;
+      this.collapsed.delete(acc);
+    }
   }
-  cancelExpand() {
-    window.clearTimeout(this.expandTimer);
-    this.expandTimer = 0;
-    this.expandPath = null;
+  async createFolderWithSelection(files) {
+    var _a;
+    if (!files.length)
+      return;
+    const parent = files[0].parent;
+    if (!parent || !files.every((file) => {
+      var _a2;
+      return ((_a2 = file.parent) == null ? void 0 : _a2.path) === parent.path;
+    })) {
+      new import_obsidian11.Notice("\u53EA\u80FD\u628A\u540C\u4E00\u6587\u4EF6\u5939\u5185\u7684\u5BF9\u8C61\u653E\u8FDB\u65B0\u6587\u4EF6\u5939");
+      return;
+    }
+    const folder = await this.createFolderIn(parent, false);
+    if (!folder)
+      return;
+    for (const file of files) {
+      if (!this.app.vault.getAbstractFileByPath(file.path))
+        continue;
+      const target = `${folder.path}/${file.name}`;
+      try {
+        await this.app.fileManager.renameFile(file, target);
+      } catch (err) {
+        new import_obsidian11.Notice(`\u79FB\u52A8\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+      }
+    }
+    this.clearSelection();
+    this.refresh();
+    this.beginRenameByPath(folder.path);
   }
+  async deleteFiles(files) {
+    var _a;
+    for (const file of files) {
+      if (!this.app.vault.getAbstractFileByPath(file.path))
+        continue;
+      try {
+        const prompt = this.app.fileManager.promptForDeletion;
+        if (typeof prompt === "function") {
+          await prompt.call(this.app.fileManager, file);
+        } else {
+          await this.app.fileManager.trashFile(file);
+        }
+      } catch (err) {
+        new import_obsidian11.Notice(`\u5220\u9664\u5931\u8D25\uFF1A${String((_a = err == null ? void 0 : err.message) != null ? _a : err)}`);
+      }
+    }
+    const rootStill = this.currentPath ? this.app.vault.getAbstractFileByPath(this.currentPath) : null;
+    if (!rootStill) {
+      this.currentPath = null;
+      this.selection.clear();
+      this.focusedPath = null;
+      this.render();
+      return;
+    }
+    this.selection.prune((path) => !!this.app.vault.getAbstractFileByPath(path));
+    this.updateSelectionView();
+    this.refresh();
+  }
+  // ============================================================
+  // 拖拽辅助（落点规则在 src/tree/tree-dnd.ts）
+  // ============================================================
   /**
    * 就地展开某个文件夹。
    * 拖拽进行中不能整棵树重绘：那会把正在拖的源节点连监听一起拆掉，这次拖拽就废了。
    */
   expandInPlace(path) {
-    var _a, _b;
-    const titleEl = this.containerEl.querySelector(
-      `.kb-tree-body .nav-folder-title[data-path="${path}"]`
-    );
-    const item = titleEl == null ? void 0 : titleEl.closest(".tree-item");
-    const folder = this.app.vault.getAbstractFileByPath(path);
-    if (!item || !(folder instanceof import_obsidian7.TFolder))
-      return;
-    this.collapsed.delete(path);
-    item.removeClass("is-collapsed");
-    (_a = item.querySelector(":scope > .nav-folder-title > .collapse-icon")) == null ? void 0 : _a.removeClass(
-      "is-collapsed"
-    );
-    const sub = (_b = item.querySelector(":scope > .nav-folder-children")) != null ? _b : item.createDiv({ cls: "tree-item-children nav-folder-children" });
-    sub.empty();
-    this.renderChildren(sub, folder);
-  }
-  /**
-   * 执行落点操作。语义与原生文件树一致：
-   * - 落在文件夹行正中 → 移入该文件夹
-   * - 落在别的条目上/下沿 → 移进「该条目所在的文件夹」并插到那个位置（这就是跨文件夹）
-   * - 落在库根标题上 → 移回知识库根目录
-   * 落在哪一层都只动「目标文件夹」的顺序：只要给出的是条目上/下沿（同层换位或跨文件夹），
-   * 就把目标文件夹切成自定义顺序；落在文件夹行正中（单纯移入）不改任何排序方式。
-   */
-  async handleDrop(from, toPath, side) {
-    var _a, _b, _c;
-    const fromFile = this.app.vault.getAbstractFileByPath(from);
-    const toFile = this.app.vault.getAbstractFileByPath(toPath);
-    if (!fromFile || !toFile)
-      return;
-    const dest = side === "inside" ? toFile instanceof import_obsidian7.TFolder ? toFile : null : toFile.parent;
-    if (!dest)
-      return;
-    const moving = dest.path !== ((_b = (_a = fromFile.parent) == null ? void 0 : _a.path) != null ? _b : "");
-    if (side === "inside" && !moving)
-      return;
-    const oldPath = fromFile.path;
-    let newPath = oldPath;
-    if (moving) {
-      newPath = this.availablePath(fromFile, dest);
-      try {
-        await this.app.fileManager.renameFile(fromFile, newPath);
-      } catch (err) {
-        new import_obsidian7.Notice("\u79FB\u52A8\u5931\u8D25\uFF1A" + String(err));
-        return;
-      }
-      this.collapsed.delete(dest.path);
-    }
-    const engine = this.plugin.sortFeature;
-    if (engine) {
-      engine.ensureItemSettings((_c = this.app.vault.getAbstractFileByPath(newPath)) != null ? _c : fromFile);
-      const destOrder = engine.ensureFolderSettings(dest.path);
-      if (side !== "inside" && destOrder.sortOrder !== "custom") {
-        destOrder.customOrder = engine.orderManager.getSortedItems(destOrder, dest.children.map((file) => ({ file }))).map((entry) => entry.file.name);
-        destOrder.sortOrder = "custom";
-      }
-      engine.orderManager.move(
-        oldPath,
-        newPath,
-        side === "inside" ? void 0 : toFile.path,
-        side === "inside" ? void 0 : side
-      );
-    }
-    const tree = this.containerEl.querySelector(".kb-tree-body");
-    if (tree)
-      this.pendingTreeScrollTop = tree.scrollTop;
-    this.render();
-  }
-  /** 目标处已有同名项时像原生一样自动避让改名（xx → xx 1），而不是拒绝这次移动 */
-  availablePath(item, destFolder) {
     var _a;
-    const target = `${destFolder.path}/${item.name}`;
-    const vault = this.app.vault;
-    const clash = (_a = typeof vault.getAbstractFileByPathInsensitive === "function" ? vault.getAbstractFileByPathInsensitive(target) : null) != null ? _a : vault.getAbstractFileByPath(target);
-    if (!clash)
-      return target;
-    if (item instanceof import_obsidian7.TFile) {
-      return vault.getAvailablePath(target.slice(0, -(item.extension.length + 1)), item.extension);
-    }
-    return vault.getAvailablePath(target, "");
-  }
-  // ============================================================
-  // 右键菜单
-  // ============================================================
-  /** 文件夹右键菜单 */
-  showFolderMenu(e, folder) {
-    var _a;
-    const menu = new import_obsidian7.Menu();
-    menu.addItem(
-      (item) => item.setTitle("\u65B0\u5EFA\u7B14\u8BB0").setIcon("document").onClick(() => void this.createNoteIn(folder))
-    );
-    menu.addItem(
-      (item) => item.setTitle("\u65B0\u5EFA\u6587\u4EF6\u5939").setIcon("folder").onClick(() => {
-        this.plugin.showInputModal("\u65B0\u5EFA\u6587\u4EF6\u5939", `\u5728\u300C${folder.name}\u300D\u4E0B\u65B0\u5EFA\u6587\u4EF6\u5939`, "", async (name) => {
-          if (!(name == null ? void 0 : name.trim()))
-            return;
-          const path = `${folder.path}/${name.trim()}`;
-          if (this.app.vault.getAbstractFileByPath(path)) {
-            new import_obsidian7.Notice(`\u5DF2\u5B58\u5728\uFF1A${path}`);
-            return;
-          }
-          await this.app.vault.createFolder(path);
-        });
-      })
-    );
-    menu.addSeparator();
-    menu.addItem(
-      (item) => item.setTitle("\u91CD\u547D\u540D").setIcon("pencil").onClick(async () => {
-        const newName = await this.plugin.promptText("\u91CD\u547D\u540D\u6587\u4EF6\u5939", "\u8F93\u5165\u65B0\u540D\u79F0", folder.name);
-        if (!(newName == null ? void 0 : newName.trim()) || newName.trim() === folder.name)
-          return;
-        const parentPath = folder.parent ? folder.parent.path : "";
-        const newPath = parentPath ? `${parentPath}/${newName.trim()}` : newName.trim();
-        if (this.app.vault.getAbstractFileByPath(newPath)) {
-          new import_obsidian7.Notice(`\u5DF2\u5B58\u5728\uFF1A${newPath}`);
-          return;
-        }
-        await this.app.fileManager.renameFile(folder, newPath);
-      })
-    );
-    menu.addItem(
-      (item) => item.setTitle("\u5220\u9664").setIcon("trash").onClick(() => {
-        const count = this.countFiles(folder);
-        this.plugin.confirmModal(
-          "\u5220\u9664\u6587\u4EF6\u5939",
-          `\u786E\u5B9A\u5220\u9664\u300C${folder.name}\u300D\u53CA\u5176\u4E2D\u7684 ${count} \u4E2A\u6587\u4EF6\u5417\uFF1F\u4F1A\u6309\u4F60\u7684\u300C\u5220\u9664\u6587\u4EF6\u300D\u8BBE\u7F6E\u79FB\u5165\u56DE\u6536\u7AD9\u6216\u6C38\u4E45\u5220\u9664\u3002`,
-          async () => {
-            await this.app.fileManager.trashFile(folder);
-            if (this.currentPath === folder.path) {
-              this.currentPath = null;
-              this.render();
-            }
-          }
-        );
-      })
-    );
-    menu.addSeparator();
-    menu.addItem(
-      (item) => item.setTitle("\u5728\u7CFB\u7EDF\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u663E\u793A").setIcon("folder-open").onClick(() => this.revealInOS(folder))
-    );
-    menu.addItem(
-      (item) => item.setTitle("\u590D\u5236\u8DEF\u5F84").setIcon("copy").onClick(async () => {
-        await navigator.clipboard.writeText(folder.path);
-        new import_obsidian7.Notice("\u5DF2\u590D\u5236\u8DEF\u5F84");
-      })
-    );
-    menu.addSeparator();
-    menu.addItem(
-      (item) => item.setTitle(this.collapsed.has(folder.path) ? "\u5C55\u5F00\u6B64\u6587\u4EF6\u5939" : "\u6298\u53E0\u6B64\u6587\u4EF6\u5939").setIcon("chevrons-up-down").onClick(() => {
-        const path = folder.path;
-        if (this.collapsed.has(path)) {
-          this.collapsed.delete(path);
-        } else {
-          this.collapsed.add(path);
-        }
-        this.render();
-      })
-    );
-    (_a = this.plugin.sortFeature) == null ? void 0 : _a.addFileMenuItems(menu, folder);
-    menu.showAtMouseEvent(e);
-  }
-  /** 文件右键菜单 */
-  showFileMenu(e, file) {
-    var _a;
-    const menu = new import_obsidian7.Menu();
-    menu.addItem(
-      (item) => item.setTitle("\u6253\u5F00").setIcon("file-text").onClick(() => this.plugin.openNote(file))
-    );
-    menu.addItem(
-      (item) => item.setTitle("\u5728\u65B0\u6807\u7B7E\u9875\u6253\u5F00").setIcon("file-plus").onClick(async () => {
-        const leaf = this.app.workspace.getLeaf("tab");
-        await leaf.openFile(file);
-      })
-    );
-    menu.addSeparator();
-    menu.addItem(
-      (item) => item.setTitle("\u91CD\u547D\u540D").setIcon("pencil").onClick(async () => {
-        const newName = await this.plugin.promptText("\u91CD\u547D\u540D\u7B14\u8BB0", "\u8F93\u5165\u65B0\u540D\u79F0", file.basename);
-        if (!(newName == null ? void 0 : newName.trim()) || newName.trim() === file.basename)
-          return;
-        const parentPath = file.parent ? file.parent.path : "";
-        const newPath = parentPath ? `${parentPath}/${newName.trim()}.md` : `${newName.trim()}.md`;
-        if (this.app.vault.getAbstractFileByPath(newPath)) {
-          new import_obsidian7.Notice(`\u5DF2\u5B58\u5728\uFF1A${newPath}`);
-          return;
-        }
-        await this.app.fileManager.renameFile(file, newPath);
-      })
-    );
-    menu.addItem(
-      (item) => item.setTitle("\u5220\u9664").setIcon("trash").onClick(() => {
-        this.plugin.confirmModal(
-          "\u5220\u9664\u7B14\u8BB0",
-          `\u786E\u5B9A\u5220\u9664\u300C${file.basename}\u300D\u5417\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002`,
-          async () => {
-            await this.app.fileManager.trashFile(file);
-          }
-        );
-      })
-    );
-    menu.addSeparator();
-    menu.addItem(
-      (item) => item.setTitle("\u5728\u7CFB\u7EDF\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u663E\u793A").setIcon("folder-open").onClick(() => this.revealInOS(file))
-    );
-    menu.addItem(
-      (item) => item.setTitle("\u590D\u5236\u8DEF\u5F84").setIcon("copy").onClick(async () => {
-        await navigator.clipboard.writeText(file.path);
-        new import_obsidian7.Notice("\u5DF2\u590D\u5236\u8DEF\u5F84");
-      })
-    );
-    (_a = this.plugin.sortFeature) == null ? void 0 : _a.addFileMenuItems(menu, file);
-    menu.showAtMouseEvent(e);
-  }
-  /** 在系统资源管理器中定位文件/文件夹 */
-  revealInOS(target) {
-    if (!revealInSystem(this.app, target.path, "reveal")) {
-      new import_obsidian7.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u5728\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u6253\u5F00");
-    }
-  }
-  /** 统计文件夹内文件数 */
-  countFiles(folder) {
-    let n = 0;
-    const walk = (f) => {
-      for (const c of f.children) {
-        if (c instanceof import_obsidian7.TFolder)
-          walk(c);
-        else
-          n++;
-      }
-    };
-    walk(folder);
-    return n;
+    if (!this.collapsed.delete(path))
+      return;
+    this.dragExpanded = true;
+    (_a = this.renderer) == null ? void 0 : _a.expandInPlace(path);
   }
 };
 
 // src/framework/feature.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 var FeatureRegistry = class {
   constructor(features, ctx) {
     this.features = features;
@@ -2546,7 +4448,7 @@ var FeatureRegistry = class {
         const msg = String((_a = err == null ? void 0 : err.message) != null ? _a : err);
         this.failures.push({ id: f.id, error: msg });
         console.error(`[\u77E5\u8BC6\u5E93\u7BA1\u7406] \u529F\u80FD\u300C${f.id}\u300D\u88C5\u914D\u5931\u8D25\uFF0C\u5DF2\u8DF3\u8FC7\uFF1A`, err);
-        new import_obsidian8.Notice(`\u77E5\u8BC6\u5E93\u7BA1\u7406\uFF1A\u529F\u80FD\u300C${f.id}\u300D\u672A\u80FD\u542F\u7528\uFF08${msg}\uFF09\uFF0C\u5176\u4F59\u529F\u80FD\u4E0D\u53D7\u5F71\u54CD\u3002`);
+        new import_obsidian12.Notice(`\u77E5\u8BC6\u5E93\u7BA1\u7406\uFF1A\u529F\u80FD\u300C${f.id}\u300D\u672A\u80FD\u542F\u7528\uFF08${msg}\uFF09\uFF0C\u5176\u4F59\u529F\u80FD\u4E0D\u53D7\u5F71\u54CD\u3002`);
       }
     }
   }
@@ -2567,7 +4469,7 @@ var FeatureRegistry = class {
     for (const f of this.features) {
       if (!f.renderSettings)
         continue;
-      new import_obsidian8.Setting(containerEl).setName((_a = f.settingsTitle) != null ? _a : f.id).setHeading();
+      new import_obsidian12.Setting(containerEl).setName((_a = f.settingsTitle) != null ? _a : f.id).setHeading();
       try {
         f.renderSettings(containerEl, this.ctx);
       } catch (err) {
@@ -2590,34 +4492,15 @@ function featureContext(plugin, deps) {
 }
 
 // src/features/sort-order/index.ts
-var import_obsidian14 = require("obsidian");
+var import_obsidian19 = require("obsidian");
 
 // src/core/sort-feature.ts
+var import_obsidian18 = require("obsidian");
+
+// src/core/order-manager.ts
 var import_obsidian13 = require("obsidian");
-
-// src/core/order-manager.ts
-var import_obsidian9 = require("obsidian");
-
-// src/core/log.ts
-var logger = { level: "silent" };
-var initLog = (scope, color) => (...args) => {
-  if (logger.level === "silent")
-    return;
-  window.console.log(`%c${scope}`, buildStyles(color), ...args);
-};
-var buildStyles = (color) => `
-  color: ${color};
-  background: #1d2131;
-  border: 1px solid ${color};
-  border-radius: 10px;
-  font-family: consolas, monospace;
-  font-size: 10px;
-  padding: 0px 4px;
-`;
-
-// src/core/order-manager.ts
 var DEFAULT_ITEM_SETTINGS = { isPinned: false, isHidden: false };
-var collator = new Intl.Collator(void 0, { sensitivity: "base", numeric: true });
+var collator2 = new Intl.Collator(void 0, { sensitivity: "base", numeric: true });
 var OrderManager = class {
   constructor(getSettings, getSortedFolderItems, saveSettings, onChanged = () => {
   }) {
@@ -2686,12 +4569,12 @@ var OrderManager = class {
         changed = true;
     }
     for (const child of folder.children) {
-      if (child instanceof import_obsidian9.TFolder) {
+      if (child instanceof import_obsidian13.TFolder) {
         if (this.sync(child))
           changed = true;
         continue;
       }
-      if (child instanceof import_obsidian9.TFile) {
+      if (child instanceof import_obsidian13.TFile) {
         const prevSettings = this.settings.items[child.path];
         if (prevSettings)
           continue;
@@ -2721,7 +4604,7 @@ var OrderManager = class {
     const insertPos = this.settings.newItemPlacement;
     this.log(`Adding new item '${item.path}' at '${insertPos}'`);
     const items = this.settings.items;
-    const isFolder = item instanceof import_obsidian9.TFolder;
+    const isFolder = item instanceof import_obsidian13.TFolder;
     const parentItem = items[item.parent.path];
     if (!parentItem)
       return;
@@ -2734,8 +4617,8 @@ var OrderManager = class {
     } else if (existing) {
       items[item.path] = {
         ...existing,
-        ctime: (_a = existing.ctime) != null ? _a : item instanceof import_obsidian9.TFile ? item.stat.ctime : Date.now(),
-        mtime: (_b = existing.mtime) != null ? _b : item instanceof import_obsidian9.TFile ? item.stat.mtime : Date.now()
+        ctime: (_a = existing.ctime) != null ? _a : item instanceof import_obsidian13.TFile ? item.stat.ctime : Date.now(),
+        mtime: (_b = existing.mtime) != null ? _b : item instanceof import_obsidian13.TFile ? item.stat.mtime : Date.now()
       };
       this.log(`Preserved existing settings for '${item.path}'`);
     } else {
@@ -2826,20 +4709,20 @@ var OrderManager = class {
     }
     void this.saveSettings();
   }
-  stageCopyState(sourcePath, copyPath) {
+  stageCopyState(sourcePath, copyPath2) {
     const items = this.settings.items;
     const sourcePrefix = sourcePath === "/" ? "" : sourcePath + "/";
-    const copyPrefix = copyPath === "/" ? "" : copyPath + "/";
+    const copyPrefix = copyPath2 === "/" ? "" : copyPath2 + "/";
     for (const [path, settings] of Object.entries(items)) {
       if (path !== sourcePath && !path.startsWith(sourcePrefix))
         continue;
-      const copyItemPath = path === sourcePath ? copyPath : copyPrefix + path.slice(sourcePrefix.length);
+      const copyItemPath = path === sourcePath ? copyPath2 : copyPrefix + path.slice(sourcePrefix.length);
       this.pendingCopies.set(copyItemPath, {
         settings: JSON.parse(JSON.stringify(settings)),
         sourceName: path === sourcePath ? this.getName(sourcePath) : void 0
       });
     }
-    this.log(`Staged copy state from '${sourcePath}' to '${copyPath}'`);
+    this.log(`Staged copy state from '${sourcePath}' to '${copyPath2}'`);
   }
   /** 按文件夹设置排序：先置顶，再按 sortOrder */
   getSortedItems(folderSettings, items) {
@@ -2855,8 +4738,8 @@ var OrderManager = class {
       if (isAPinned !== isBPinned)
         return isAPinned ? -1 : 1;
       if (folderSettings.sortOrder !== "custom") {
-        const isAFolder = a instanceof import_obsidian9.TFolder;
-        const isBFolder = b instanceof import_obsidian9.TFolder;
+        const isAFolder = a instanceof import_obsidian13.TFolder;
+        const isBFolder = b instanceof import_obsidian13.TFolder;
         if (isAFolder !== isBFolder)
           return isAFolder ? -1 : 1;
       }
@@ -2885,12 +4768,12 @@ var OrderManager = class {
     });
   }
   compareByName(a, b) {
-    return collator.compare(a.name, b.name);
+    return collator2.compare(a.name, b.name);
   }
   compareByTimestamp(a, b, type, direction) {
     var _a, _b;
-    const aSet = a instanceof import_obsidian9.TFile ? this.settings.items[a.path] : void 0;
-    const bSet = b instanceof import_obsidian9.TFile ? this.settings.items[b.path] : void 0;
+    const aSet = a instanceof import_obsidian13.TFile ? this.settings.items[a.path] : void 0;
+    const bSet = b instanceof import_obsidian13.TFile ? this.settings.items[b.path] : void 0;
     const aTimestamp = (_a = aSet == null ? void 0 : aSet[type]) != null ? _a : -Infinity;
     const bTimestamp = (_b = bSet == null ? void 0 : bSet[type]) != null ? _b : -Infinity;
     return direction === "asc" ? aTimestamp - bTimestamp : bTimestamp - aTimestamp;
@@ -2958,12 +4841,12 @@ var HideManager = class {
 };
 
 // src/core/patcher.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 var Patcher = class {
-  constructor(getSettings, orderManager, getExplorerView, onExplorerSorted) {
+  constructor(getSettings, orderManager, getExplorerViews, onExplorerSorted) {
     this.getSettings = getSettings;
     this.orderManager = orderManager;
-    this.getExplorerView = getExplorerView;
+    this.getExplorerViews = getExplorerViews;
     this.onExplorerSorted = onExplorerSorted;
     this.log = initLog("PATCHER", "#988bff");
     this.unpatchExplorerSorting = null;
@@ -2972,7 +4855,7 @@ var Patcher = class {
   /** patch Vault.copy：复制文件时同步顺序状态 */
   patchVaultCopy() {
     const { log, orderManager, onExplorerSorted } = this;
-    const vaultProto = import_obsidian10.Vault.prototype;
+    const vaultProto = import_obsidian14.Vault.prototype;
     const origCopy = vaultProto.copy;
     vaultProto.copy = async function(file, newPath) {
       log(`Item copied: '${file.path}' -> '${newPath}'`);
@@ -2988,7 +4871,7 @@ var Patcher = class {
   }
   /** patch 文件浏览器的排序函数——这是「自定义顺序影响原生树」的核心 */
   patchExplorerSorting() {
-    const explorerView = this.getExplorerView();
+    const explorerView = this.getExplorerViews()[0];
     if (!explorerView)
       return this.log("Explorer view not found, skipping patch");
     const { getSettings, orderManager } = this;
@@ -3009,13 +4892,15 @@ var Patcher = class {
     };
     this.log("Explorer patched");
   }
-  /** 调用原生文件浏览器重新排序 */
+  /** 调用所有原生文件浏览器实例重新排序（侧栏可能同时存在多个 Files 面板） */
   sortExplorer() {
-    var _a, _b;
-    try {
-      (_b = (_a = this.getExplorerView()) == null ? void 0 : _a.sort) == null ? void 0 : _b.call(_a);
-    } catch (err) {
-      this.log("sortExplorer failed", err);
+    var _a;
+    for (const view of this.getExplorerViews()) {
+      try {
+        (_a = view == null ? void 0 : view.sort) == null ? void 0 : _a.call(view);
+      } catch (err) {
+        this.log("sortExplorer failed", err);
+      }
     }
   }
   unpatch() {
@@ -3027,477 +4912,219 @@ var Patcher = class {
 };
 
 // src/core/dnd-engine.ts
-var import_obsidian11 = require("obsidian");
-var FOLDER_INSIDE_TOP = 0.3;
-var FOLDER_INSIDE_BOTTOM = 0.7;
 var DndEngine = class {
-  constructor(host) {
-    this.host = host;
-    this.log = initLog("DND ENGINE", "#a6ff00");
-    this.attached = false;
-    this.explorerEl = null;
-    this.explorerRect = null;
-    this.draggedItem = null;
-    this.draggedRow = null;
-    this.draggedPinned = false;
-    /** 本次拖拽涉及的路径（被拖条目 + 多选中的其余条目），不参与落点 */
-    this.draggingPaths = /* @__PURE__ */ new Set();
-    this.dropSibling = null;
-    this.dropFolder = null;
-    this.insertSide = "before";
-    this.pointer = { x: 0, y: 0 };
-    /** 手动排序后要恢复的原生树滚动位置；用于顶掉 Obsidian 自动定位当前文件的滚动 */
-    this.pendingScrollTop = null;
-    this.autoscrollZoneHeight = 60;
-    this.edgeScrollSpeed = 20;
-    this.autoscrollRaf = 0;
-    this.expandDelay = 1e3;
-    this.expandTarget = null;
-    this.expandTimeout = 0;
-    this.onDragStart = (event) => {
-      var _a, _b;
-      const target = event.target;
-      const container = (_a = target == null ? void 0 : target.closest) == null ? void 0 : _a.call(target, ".nav-files-container");
-      if (!container || !container.closest('[data-type="file-explorer"]'))
-        return;
-      const row = (_b = target == null ? void 0 : target.closest) == null ? void 0 : _b.call(target, ".tree-item");
-      if (!row)
-        return;
-      const self = this.selfOf(row);
-      const path = self == null ? void 0 : self.dataset.path;
-      if (!path)
-        return;
-      const file = this.host.app.vault.getAbstractFileByPath(path);
-      if (!file)
-        return;
-      this.explorerEl = container;
-      this.explorerRect = container.getBoundingClientRect();
-      this.draggedItem = file;
-      this.draggedRow = row;
-      this.draggedPinned = this.host.getItemSettings(file.path).isPinned;
-      this.draggingPaths = new Set(this.getSelectedItems().map((item) => item.file.path));
-      this.draggingPaths.add(file.path);
-      document.body.classList.add("kb-dragging");
-      this.log(`Started dragging '${file.path}'`);
-    };
-    this.onDragOver = (event) => {
-      var _a;
-      if (!this.draggedItem)
-        return;
-      const target = event.target;
-      const container = (_a = target == null ? void 0 : target.closest) == null ? void 0 : _a.call(target, ".nav-files-container");
-      if (container && container.closest('[data-type="file-explorer"]')) {
-        if (container !== this.explorerEl) {
-          this.explorerEl = container;
-          this.explorerRect = container.getBoundingClientRect();
-        }
-      }
-      const view = this.getExplorerViewFor(this.explorerEl);
-      if (view)
-        view.lastDropTargetEl = null;
-      this.pointer = { x: event.clientX, y: event.clientY };
-      this.startAutoscroll();
-      if (!this.isPointerInsideExplorer()) {
-        this.clearDropIndicators();
-        this.dropSibling = null;
-        this.dropFolder = null;
-        this.clearPendingExpand();
-        return;
-      }
-      if (this.resolveAndApplyDropTarget()) {
-        event.preventDefault();
-        if (event.dataTransfer)
-          event.dataTransfer.dropEffect = "move";
-      }
-    };
-    this.onScroll = () => {
-      if (!this.draggedItem || !this.isPointerInsideExplorer())
-        return;
-      this.resolveAndApplyDropTarget();
-    };
-    this.onDrop = (event) => {
-      var _a;
-      if (!this.draggedItem)
-        return;
-      const target = event.target;
-      const container = (_a = target == null ? void 0 : target.closest) == null ? void 0 : _a.call(target, ".nav-files-container");
-      if (container && container.closest('[data-type="file-explorer"]') && container !== this.explorerEl) {
-        this.explorerEl = container;
-        this.explorerRect = container.getBoundingClientRect();
-      }
-      this.pointer = { x: event.clientX, y: event.clientY };
-      if (!this.isPointerInsideExplorer()) {
-        this.log("Dropped outside native explorer, skipping move");
-        this.resetDrag();
-        return;
-      }
-      event.preventDefault();
-      if (!this.dropSibling && !this.dropFolder)
-        this.resolveAndApplyDropTarget();
-      this.commitDrop();
-      this.resetDrag();
-    };
-    this.onDragEnd = () => {
-      if (!this.draggedItem)
-        return;
-      this.log(`Ended dragging '${this.draggedItem.path}'`);
-      this.resetDrag();
-    };
-    this.handleAutoscroll = () => {
-      if (!this.explorerEl || !this.explorerRect || !this.draggedItem) {
-        this.autoscrollRaf = 0;
-        return;
-      }
-      if (this.pointer.x < this.explorerRect.left || this.pointer.x > this.explorerRect.right) {
-        this.autoscrollRaf = 0;
-        return;
-      }
-      const distToTop = this.pointer.y - this.explorerRect.top;
-      const distToBottom = this.explorerRect.bottom - this.pointer.y;
-      let speed = 0;
-      if (distToTop < this.autoscrollZoneHeight)
-        speed = -this.resolveScrollSpeed(distToTop);
-      else if (distToBottom < this.autoscrollZoneHeight)
-        speed = this.resolveScrollSpeed(distToBottom);
-      if (!speed) {
-        this.autoscrollRaf = 0;
-        return;
-      }
-      const before = this.explorerEl.scrollTop;
-      this.explorerEl.scrollTop += speed;
-      if (this.explorerEl.scrollTop === before) {
-        this.autoscrollRaf = 0;
-        return;
-      }
-      this.resolveAndApplyDropTarget();
-      this.autoscrollRaf = window.requestAnimationFrame(this.handleAutoscroll);
-    };
+  constructor(controller, surface) {
+    this.controller = controller;
+    this.surface = surface;
   }
-  /** 挂在 document 上：文件浏览器重建、多个 Files 面板都不影响监听 */
   attach() {
-    if (this.attached)
-      return;
-    this.attached = true;
-    document.addEventListener("dragstart", this.onDragStart, true);
-    document.addEventListener("dragover", this.onDragOver, true);
-    document.addEventListener("drop", this.onDrop, true);
-    document.addEventListener("dragend", this.onDragEnd, true);
-    this.log("Attached to document");
+    this.controller.attach();
   }
   detach() {
-    document.removeEventListener("dragstart", this.onDragStart, true);
-    document.removeEventListener("dragover", this.onDragOver, true);
-    document.removeEventListener("drop", this.onDrop, true);
-    document.removeEventListener("dragend", this.onDragEnd, true);
-    this.attached = false;
-    this.resetDrag();
-    this.log("Detached");
+    this.controller.detach();
   }
-  resolveAndApplyDropTarget() {
-    this.clearDropIndicators();
-    this.resolveDropTarget();
-    this.applyDropIndicators();
-    return !!(this.dropSibling || this.dropFolder);
+  get draggedItem() {
+    return this.controller.draggedItem;
   }
-  resolveDropTarget() {
+  get dropSibling() {
+    const path = this.controller.dropSiblingPath;
+    return path ? this.surface.elementForSibling(path) : null;
+  }
+  get dropFolder() {
+    const path = this.controller.dropFolderPath;
+    return path ? this.surface.elementForFolder(path) : null;
+  }
+};
+
+// src/tree/native-surface.ts
+var import_obsidian15 = require("obsidian");
+var NativeTreeSurface = class {
+  constructor(app) {
+    this.app = app;
+    this.scopeRootPath = "/";
+    this.container = null;
+    this.markedSibling = null;
+    this.markedFolder = null;
+    this.pendingScroll = null;
+  }
+  get scrollEl() {
+    return this.container;
+  }
+  /** 拖拽开始时确认目标在原生文件浏览器里，并绑定该面板 */
+  resolveDragSource(target) {
+    const el = target instanceof Element ? target : null;
+    if (!el)
+      return null;
+    const container = el.closest(".nav-files-container");
+    if (!container || !container.closest('[data-type="file-explorer"]'))
+      return null;
+    const row = el.closest(".tree-item");
+    const self = this.selfOf(row);
+    const path = self == null ? void 0 : self.dataset.path;
+    if (!path)
+      return null;
+    if (!this.app.vault.getAbstractFileByPath(path))
+      return null;
+    this.container = container;
+    return { surface: this, path };
+  }
+  /** 指针移到另一个 Files 面板时重新绑定容器；不在原生树上则保持原容器 */
+  resolveSurfaceAt(_active, point) {
+    var _a;
+    const hit = activeDocument.elementFromPoint(point.x, point.y);
+    const container = (_a = hit == null ? void 0 : hit.closest) == null ? void 0 : _a.call(hit, ".nav-files-container");
+    if (container && container.closest('[data-type="file-explorer"]')) {
+      this.container = container;
+    }
+    return this;
+  }
+  scrollRect() {
     var _a, _b;
-    if (!this.explorerEl || !this.draggedItem || !this.draggedRow)
-      return;
-    const hit = activeDocument.elementFromPoint(this.pointer.x, this.pointer.y);
-    if (!hit || !this.explorerEl.contains(hit))
-      return;
+    return (_b = (_a = this.container) == null ? void 0 : _a.getBoundingClientRect()) != null ? _b : null;
+  }
+  containsPoint(x, y) {
+    const el = this.container;
+    if (!el || !el.isConnected)
+      return false;
+    const rect = el.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+  resolveRowAtPoint(x, y) {
+    const hit = this.hitAt(x, y);
+    if (!hit)
+      return null;
     const title = hit.closest(".nav-folder-title, .nav-file-title");
-    if (title && this.explorerEl.contains(title)) {
-      this.resolveTitleTarget(title);
-      return;
+    if (title) {
+      const path = title.dataset.path;
+      if (!path)
+        return null;
+      return {
+        path,
+        kind: title.classList.contains("nav-folder-title") ? "folder" : "file",
+        rect: title.getBoundingClientRect()
+      };
     }
     const folderRow = hit.closest(".tree-item.nav-folder");
-    if (folderRow && this.explorerEl.contains(folderRow)) {
-      const folderTitle = this.selfOf(folderRow);
-      if (folderTitle) {
-        const rect = folderTitle.getBoundingClientRect();
-        if (this.pointer.y >= rect.top && this.pointer.y <= rect.bottom) {
-          this.resolveTitleTarget(folderTitle);
-          return;
-        }
-      }
-      const children2 = folderRow.querySelector(
-        ":scope > .nav-folder-children"
-      );
-      this.resolveBlankTarget(children2, folderRow);
-      return;
-    }
-    const children = hit.closest(".nav-folder-children");
-    if (children && this.explorerEl.contains(children)) {
-      const folder = (_b = (_a = children.parentElement) == null ? void 0 : _a.closest(".nav-folder")) != null ? _b : null;
-      this.resolveBlankTarget(children, folder);
-      return;
-    }
-    const rootContainer = this.explorerEl.firstElementChild;
-    this.resolveBlankTarget(rootContainer, null);
-  }
-  /** 空白/行距区域：按方向感知找最近的标题行；没有行才退化成移入容器 */
-  resolveBlankTarget(container, folderRow) {
-    var _a, _b, _c, _d, _e;
-    this.clearPendingExpand();
-    let folderPath = "/";
     if (folderRow) {
-      folderPath = (_a = this.resolveItemPath(folderRow)) != null ? _a : "";
-      if (!folderPath || this.isSelfOrDescendant(folderRow))
-        return;
-      if (this.draggingPaths.has(folderPath))
-        return;
-      if (this.draggedPinned && ((_c = (_b = this.draggedItem) == null ? void 0 : _b.parent) == null ? void 0 : _c.path) !== folderPath)
-        return;
-    } else if (this.draggedPinned && ((_e = (_d = this.draggedItem) == null ? void 0 : _d.parent) == null ? void 0 : _e.path) !== "/") {
-      return;
-    }
-    const near = container ? this.nearestSiblingRow(container, folderPath) : null;
-    if (near) {
-      this.setSiblingTarget(near.row, near.side);
-      if (this.dropSibling)
-        return;
-    }
-    if (this.draggedPinned)
-      return;
-    if (folderRow)
-      this.dropFolder = folderRow;
-    else if (!this.draggedPinned)
-      this.dropFolder = container;
-  }
-  /** 在容器的直接子行里找离指针最近的一行，并给出「前/后」方向 */
-  nearestSiblingRow(container, folderPath) {
-    var _a, _b;
-    const rows = Array.from(container.children).filter(
-      (el) => el instanceof HTMLElement && el.classList.contains("tree-item")
-    );
-    let best = null;
-    for (const row of rows) {
-      if (this.isSelfOrDescendant(row))
-        continue;
-      const path = this.resolveItemPath(row);
-      if (!path || this.draggingPaths.has(path))
-        continue;
-      const pinned = this.host.getItemSettings(path).isPinned;
-      if (pinned !== this.draggedPinned)
-        continue;
-      if (this.draggedPinned && ((_b = (_a = this.draggedItem) == null ? void 0 : _a.parent) == null ? void 0 : _b.path) !== folderPath)
-        continue;
-      const self = this.selfOf(row);
-      if (!self)
-        continue;
-      const rect = self.getBoundingClientRect();
-      let side;
-      let dist;
-      if (this.pointer.y < rect.top) {
-        dist = rect.top - this.pointer.y;
-        side = "before";
-      } else if (this.pointer.y > rect.bottom) {
-        dist = this.pointer.y - rect.bottom;
-        side = "after";
-      } else {
-        dist = 0;
-        side = this.pointer.y < rect.top + rect.height / 2 ? "before" : "after";
+      const titleEl = this.selfOf(folderRow);
+      const path = titleEl == null ? void 0 : titleEl.dataset.path;
+      if (!titleEl || !path)
+        return null;
+      const rect = titleEl.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom) {
+        return { path, kind: "folder", rect };
       }
-      if (!best || dist < best.dist - 0.01 || Math.abs(dist - best.dist) <= 0.01 && side === "before" && best.side === "after") {
-        best = { row, side, dist };
-      }
-    }
-    return best ? { row: best.row, side: best.side } : null;
-  }
-  /** 目标文件夹当前显示顺序里的最后一个非拖拽子项，用于「移入文件夹」落到末尾 */
-  lastChildPath(folderPath) {
-    var _a, _b;
-    if (!this.draggedItem)
-      return null;
-    const folder = folderPath === "/" ? this.host.app.vault.getRoot() : this.host.app.vault.getAbstractFileByPath(folderPath);
-    if (!(folder instanceof import_obsidian11.TFolder))
-      return null;
-    const view = this.getExplorerViewFor(this.explorerEl);
-    let sorted;
-    try {
-      sorted = (_b = (_a = view == null ? void 0 : view.getSortedFolderItems) == null ? void 0 : _a.call(view, folder)) != null ? _b : folder.children.map((file) => ({ file }));
-    } catch (e) {
-      sorted = folder.children.map((file) => ({ file }));
-    }
-    for (let i = sorted.length - 1; i >= 0; i--) {
-      const file = sorted[i].file;
-      if (file.path === this.draggedItem.path || this.draggingPaths.has(file.path))
-        continue;
-      return file.path;
     }
     return null;
   }
-  resolveTitleTarget(title) {
-    const row = title.closest(".tree-item");
-    if (!row)
-      return;
-    const rect = title.getBoundingClientRect();
-    const isFolder = title.classList.contains("nav-folder-title");
-    if (isFolder) {
-      const ratio = rect.height > 0 ? (this.pointer.y - rect.top) / rect.height : 0.5;
-      if (ratio > FOLDER_INSIDE_TOP && ratio < FOLDER_INSIDE_BOTTOM) {
-        if (this.draggedPinned || this.isSelfOrDescendant(row)) {
-          this.clearPendingExpand();
-          return;
-        }
-        const folderPath = this.resolveItemPath(row);
-        if (!folderPath || this.draggingPaths.has(folderPath)) {
-          this.clearPendingExpand();
-          return;
-        }
-        this.dropFolder = row;
-        if (row.classList.contains("is-collapsed"))
-          this.scheduleFolderExpand(row);
-        else
-          this.clearPendingExpand();
-        return;
+  blankFolderAt(x, y) {
+    var _a, _b, _c, _d, _e, _f, _g;
+    const hit = this.hitAt(x, y);
+    if (!hit)
+      return null;
+    if (hit.closest(".nav-folder-title, .nav-file-title"))
+      return null;
+    const folderRow = hit.closest(".tree-item.nav-folder");
+    if (folderRow && ((_a = this.container) == null ? void 0 : _a.contains(folderRow))) {
+      const titleEl = this.selfOf(folderRow);
+      if (titleEl) {
+        const rect = titleEl.getBoundingClientRect();
+        if (y >= rect.top && y <= rect.bottom)
+          return null;
       }
-      this.clearPendingExpand();
-      this.setSiblingTarget(row, ratio < 0.5 ? "before" : "after");
-      return;
+      return (_b = titleEl == null ? void 0 : titleEl.dataset.path) != null ? _b : null;
     }
-    this.clearPendingExpand();
-    this.setSiblingTarget(row, this.pointer.y < rect.top + rect.height / 2 ? "before" : "after");
+    const children = hit.closest(".nav-folder-children");
+    if (children && ((_c = this.container) == null ? void 0 : _c.contains(children))) {
+      const folder = (_e = (_d = children.parentElement) == null ? void 0 : _d.closest(".tree-item.nav-folder")) != null ? _e : null;
+      return (_f = this.pathOfElement(folder)) != null ? _f : this.scopeRootPath;
+    }
+    return ((_g = this.container) == null ? void 0 : _g.firstElementChild) ? this.scopeRootPath : null;
   }
-  setSiblingTarget(row, side) {
-    var _a, _b;
-    if (this.isSelfOrDescendant(row))
-      return;
-    const rowPath = this.resolveItemPath(row);
-    if (!rowPath || this.draggingPaths.has(rowPath))
-      return;
-    const folderEl = this.parentFolderOf(row);
-    const folderPath = this.resolveItemPath(folderEl);
-    if (!folderPath)
-      return;
-    const rowPinned = this.host.getItemSettings(rowPath).isPinned;
-    if (rowPinned !== this.draggedPinned)
-      return;
-    if (this.draggedPinned && ((_b = (_a = this.draggedItem) == null ? void 0 : _a.parent) == null ? void 0 : _b.path) !== folderPath)
-      return;
-    this.dropSibling = row;
-    this.insertSide = side;
-    this.dropFolder = folderEl;
+  childRowRects(folderPath) {
+    var _a;
+    const container = this.childrenContainer(folderPath);
+    if (!container)
+      return [];
+    const rows = [];
+    for (const child of Array.from(container.children)) {
+      if (!(child instanceof HTMLElement) || !child.classList.contains("tree-item"))
+        continue;
+      const titleEl = this.selfOf(child);
+      const path = (_a = titleEl == null ? void 0 : titleEl.dataset.path) != null ? _a : this.pathOfElement(child);
+      if (!titleEl || !path)
+        continue;
+      rows.push({ path, rect: titleEl.getBoundingClientRect() });
+    }
+    return rows;
   }
-  /** 把目标文件夹当前显示顺序固化成 customOrder，再切到自定义顺序 */
-  ensureCustomSortMode(folderPath) {
+  selectedPaths() {
+    var _a;
+    const view = this.view();
+    const selectedDoms = (_a = view == null ? void 0 : view.tree) == null ? void 0 : _a.selectedDoms;
+    if (!selectedDoms)
+      return [];
+    const resolved = [...selectedDoms].map((selected) => {
+      var _a2, _b, _c;
+      const path = selected.el ? this.pathOfElement(selected.el) : (_b = (_a2 = selected.file) == null ? void 0 : _a2.path) != null ? _b : null;
+      return path ? { path, el: (_c = selected.el) != null ? _c : null } : null;
+    }).filter((entry) => !!entry);
+    const seen = /* @__PURE__ */ new Set();
+    const unique = resolved.filter((entry) => {
+      if (seen.has(entry.path))
+        return false;
+      seen.add(entry.path);
+      return true;
+    });
+    return unique.sort((a, b) => {
+      if (!a.el || !b.el)
+        return 0;
+      if (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING)
+        return -1;
+      if (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_PRECEDING)
+        return 1;
+      return 0;
+    }).map((entry) => entry.path);
+  }
+  isCollapsed(path) {
     var _a, _b;
-    const items = this.host.getSettings().items;
-    let folderSettings = items[folderPath];
-    if ((folderSettings == null ? void 0 : folderSettings.sortOrder) === "custom")
-      return;
-    const folder = folderPath === "/" ? this.host.app.vault.getRoot() : this.host.app.vault.getAbstractFileByPath(folderPath);
-    if (!(folder instanceof import_obsidian11.TFolder))
-      return;
-    const view = this.getExplorerViewFor(this.explorerEl);
-    let sorted;
+    return (_b = (_a = this.rowElement(path)) == null ? void 0 : _a.classList.contains("is-collapsed")) != null ? _b : false;
+  }
+  expand(path) {
+    var _a, _b, _c;
+    const view = this.view();
+    void ((_c = (_b = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[path]) == null ? void 0 : _b.setCollapsed) == null ? void 0 : _c.call(_b, false, true));
+  }
+  orderedChildPaths(folderPath) {
+    var _a, _b;
+    const folder = folderPath === "/" ? this.app.vault.getRoot() : this.app.vault.getAbstractFileByPath(folderPath);
+    if (!(folder instanceof import_obsidian15.TFolder))
+      return [];
     try {
-      sorted = (_b = (_a = view == null ? void 0 : view.getSortedFolderItems) == null ? void 0 : _a.call(view, folder)) != null ? _b : folder.children.map((file) => ({ file }));
-    } catch (e) {
-      sorted = folder.children.map((file) => ({ file }));
-    }
-    if (!folderSettings) {
-      folderSettings = {
-        isPinned: false,
-        isHidden: false,
-        sortOrder: "custom",
-        customOrder: []
-      };
-      items[folderPath] = folderSettings;
-    }
-    folderSettings.customOrder = sorted.map((entry) => entry.file.name);
-    folderSettings.sortOrder = "custom";
-  }
-  parentFolderOf(row) {
-    var _a, _b, _c, _d;
-    const container = row.parentElement;
-    if (container == null ? void 0 : container.classList.contains("nav-folder-children")) {
-      return (_b = (_a = container.parentElement) == null ? void 0 : _a.closest(".nav-folder")) != null ? _b : null;
-    }
-    return (_d = (_c = this.explorerEl) == null ? void 0 : _c.firstElementChild) != null ? _d : null;
-  }
-  /** 被拖行本身或它的后代（拖文件夹时不能落进自己里面） */
-  isSelfOrDescendant(row) {
-    return !!this.draggedRow && (row === this.draggedRow || this.draggedRow.contains(row));
-  }
-  applyDropIndicators() {
-    if (this.dropSibling)
-      this.dropSibling.dataset.kbDropSibling = this.insertSide;
-    if (this.dropFolder && !this.dropSibling)
-      this.dropFolder.dataset.kbDropFolder = "";
-  }
-  /** 只清上一次的两个落点，不做全文档查询——上万行时 querySelectorAll 会在每一帧拖垮界面 */
-  clearDropIndicators() {
-    if (this.dropSibling)
-      delete this.dropSibling.dataset.kbDropSibling;
-    if (this.dropFolder)
-      delete this.dropFolder.dataset.kbDropFolder;
-    this.dropSibling = null;
-    this.dropFolder = null;
-  }
-  commitDrop() {
-    if (!this.draggedItem)
-      return;
-    const dropFolderPath = this.resolveItemPath(this.dropFolder);
-    if (!dropFolderPath)
-      return this.log("Drop folder not found, skipping");
-    let dropSiblingPath = this.resolveItemPath(this.dropSibling);
-    const droppedOnSibling = !!dropSiblingPath;
-    if (droppedOnSibling)
-      this.ensureCustomSortMode(dropFolderPath);
-    else {
-      dropSiblingPath = this.lastChildPath(dropFolderPath);
-    }
-    const selectedItems = this.getSelectedItems();
-    const isDraggedSelected = selectedItems.some((item) => item.file === this.draggedItem);
-    this.pendingScrollTop = this.explorerEl ? { container: this.explorerEl, top: this.explorerEl.scrollTop } : null;
-    if (isDraggedSelected && selectedItems.length > 0) {
-      const pinnedStates = new Set(
-        selectedItems.map((item) => this.host.getItemSettings(item.file.path).isPinned)
-      );
-      if (pinnedStates.size > 1)
-        return this.log("Selection mixes pinned/unpinned, skipping");
-      if (pinnedStates.has(true)) {
-        const parentPaths = new Set(selectedItems.map((item) => {
-          var _a;
-          return (_a = item.file.parent) == null ? void 0 : _a.path;
-        }));
-        if (parentPaths.size > 1)
-          return this.log("Pinned selection spans folders, skipping");
+      const sorted = (_b = (_a = this.view()) == null ? void 0 : _a.getSortedFolderItems) == null ? void 0 : _b.call(_a, folder);
+      if (Array.isArray(sorted)) {
+        return sorted.map((entry) => {
+          var _a2;
+          return (_a2 = entry == null ? void 0 : entry.file) == null ? void 0 : _a2.path;
+        }).filter((path) => !!path);
       }
-      const firstSide = droppedOnSibling ? this.insertSide : "after";
-      selectedItems.forEach((item, idx) => {
-        const insertSide = idx === 0 ? firstSide : "after";
-        const newPath = this.resolveNewPath(item.file, dropFolderPath);
-        this.moveItem(item.file, newPath, dropFolderPath, dropSiblingPath, insertSide);
-        dropSiblingPath = newPath;
-      });
-    } else {
-      const newPath = this.resolveNewPath(this.draggedItem, dropFolderPath);
-      this.moveItem(
-        this.draggedItem,
-        newPath,
-        dropFolderPath,
-        dropSiblingPath,
-        droppedOnSibling ? this.insertSide : "after"
-      );
+    } catch (e) {
     }
-    this.scheduleScrollRestore();
+    return folder.children.map((file) => file.path);
   }
-  /**
-   * 排序后把滚动位置拉回用户拖动时所在的位置。
-   * Obsidian 开启「自动显示当前文件」时会在重排后把活动文件滚回视野，
-   * 用户刚排好的位置就被抢走；这里覆盖这次滚动，活动文件切换时的自动定位不受影响。
-   */
-  scheduleScrollRestore() {
-    const pending = this.pendingScrollTop;
+  captureScroll() {
+    if (!this.container)
+      return;
+    this.pendingScroll = { el: this.container, top: this.container.scrollTop };
+  }
+  restoreScrollAfterMoves() {
+    const pending = this.pendingScroll;
     if (!pending)
       return;
-    this.pendingScrollTop = null;
+    this.pendingScroll = null;
     const restore = () => {
-      if (pending.container.isConnected)
-        pending.container.scrollTop = pending.top;
+      if (pending.el.isConnected)
+        pending.el.scrollTop = pending.top;
     };
     window.requestAnimationFrame(() => {
       restore();
@@ -3505,23 +5132,91 @@ var DndEngine = class {
     });
     window.setTimeout(restore, 80);
   }
-  resetDrag() {
-    this.clearDropIndicators();
-    this.clearPendingExpand();
-    this.stopAutoscroll();
-    this.draggedItem = null;
-    this.draggedRow = null;
-    this.draggedPinned = false;
-    this.draggingPaths.clear();
-    this.explorerEl = null;
-    this.explorerRect = null;
-    document.body.classList.remove("kb-dragging");
+  isInScope() {
+    return true;
   }
-  isPointerInsideExplorer() {
-    const rect = this.explorerRect;
-    if (!rect)
-      return false;
-    return this.pointer.x >= rect.left && this.pointer.x <= rect.right && this.pointer.y >= rect.top && this.pointer.y <= rect.bottom;
+  markSibling(path, side) {
+    const el = this.rowElement(path);
+    if (!el)
+      return;
+    this.markedSibling = el;
+    el.dataset.kbDropSibling = side;
+  }
+  markFolder(path) {
+    var _a, _b;
+    const el = path === this.scopeRootPath ? (_b = (_a = this.container) == null ? void 0 : _a.firstElementChild) != null ? _b : null : this.rowElement(path);
+    if (!el)
+      return;
+    this.markedFolder = el;
+    el.dataset.kbDropFolder = "";
+  }
+  clearMarks() {
+    if (this.markedSibling) {
+      delete this.markedSibling.dataset.kbDropSibling;
+      this.markedSibling = null;
+    }
+    if (this.markedFolder) {
+      delete this.markedFolder.dataset.kbDropFolder;
+      this.markedFolder = null;
+    }
+  }
+  onDragOver() {
+    const view = this.view();
+    if (view)
+      view.lastDropTargetEl = null;
+  }
+  /** t16 调试读取：落点线所在的原生行 */
+  elementForSibling(path) {
+    return this.rowElement(path);
+  }
+  /** t16 调试读取：移入高亮所在的文件夹行（根为树容器） */
+  elementForFolder(path) {
+    var _a, _b;
+    if (path === this.scopeRootPath) {
+      return (_b = (_a = this.container) == null ? void 0 : _a.firstElementChild) != null ? _b : null;
+    }
+    return this.rowElement(path);
+  }
+  hitAt(x, y) {
+    const container = this.container;
+    if (!container)
+      return null;
+    const hit = activeDocument.elementFromPoint(x, y);
+    if (!hit || !container.contains(hit))
+      return null;
+    return hit;
+  }
+  childrenContainer(folderPath) {
+    var _a, _b, _c;
+    if (folderPath === this.scopeRootPath) {
+      return (_b = (_a = this.container) == null ? void 0 : _a.firstElementChild) != null ? _b : null;
+    }
+    const row = this.rowElement(folderPath);
+    return (_c = row == null ? void 0 : row.querySelector(":scope > .nav-folder-children")) != null ? _c : null;
+  }
+  rowElement(path) {
+    var _a, _b, _c, _d, _e, _f, _g;
+    const view = this.view();
+    const item = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[path];
+    const el = (_e = (_d = item == null ? void 0 : item.el) != null ? _d : (_c = (_b = item == null ? void 0 : item.selfEl) == null ? void 0 : _b.closest) == null ? void 0 : _c.call(_b, ".tree-item")) != null ? _e : null;
+    if (el instanceof HTMLElement && el.classList.contains("tree-item"))
+      return el;
+    const escaped = path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const self = (_f = this.container) == null ? void 0 : _f.querySelector(`[data-path="${escaped}"]`);
+    return (_g = self == null ? void 0 : self.closest(".tree-item")) != null ? _g : null;
+  }
+  pathOfElement(el) {
+    var _a, _b, _c, _d, _e;
+    if (!el)
+      return null;
+    if (el === ((_a = this.container) == null ? void 0 : _a.firstElementChild))
+      return this.scopeRootPath;
+    const self = this.selfOf(el);
+    const path = self == null ? void 0 : self.dataset.path;
+    if (path)
+      return path;
+    const row = el.matches(".tree-item") ? el : el.closest(".tree-item");
+    return row ? (_e = (_d = (_c = (_b = this.view()) == null ? void 0 : _b.files) == null ? void 0 : _c.get(row)) == null ? void 0 : _d.path) != null ? _e : null : null;
   }
   selfOf(el) {
     var _a, _b;
@@ -3536,116 +5231,22 @@ var DndEngine = class {
       ":scope > .tree-item-self"
     )) != null ? _b : null;
   }
-  resolveItemPath(el) {
-    var _a, _b, _c, _d, _e;
-    if (!el)
-      return null;
-    if (el === ((_a = this.explorerEl) == null ? void 0 : _a.firstElementChild))
-      return "/";
-    const self = this.selfOf(el);
-    const path = self == null ? void 0 : self.dataset.path;
-    if (path)
-      return path;
-    const row = el.matches(".tree-item") ? el : el.closest(".tree-item");
-    return (_e = (_d = (_c = (_b = this.getExplorerViewFor(this.explorerEl)) == null ? void 0 : _b.files) == null ? void 0 : _c.get(row)) == null ? void 0 : _d.path) != null ? _e : null;
-  }
-  getExplorerViewFor(el) {
+  view() {
     var _a, _b, _c;
-    const leaves = this.host.app.workspace.getLeavesOfType("file-explorer");
-    if (el) {
+    const leaves = this.app.workspace.getLeavesOfType("file-explorer");
+    if (this.container) {
       for (const leaf of leaves) {
         const view = leaf.view;
-        if ((_a = view == null ? void 0 : view.containerEl) == null ? void 0 : _a.contains(el))
+        if ((_a = view == null ? void 0 : view.containerEl) == null ? void 0 : _a.contains(this.container))
           return view;
       }
     }
     return (_c = (_b = leaves[0]) == null ? void 0 : _b.view) != null ? _c : null;
   }
-  getSelectedItems() {
-    var _a;
-    const view = this.getExplorerViewFor(this.explorerEl);
-    const selectedDoms = (_a = view == null ? void 0 : view.tree) == null ? void 0 : _a.selectedDoms;
-    if (!selectedDoms)
-      return [];
-    const selectedItems = [...selectedDoms];
-    const resolved = selectedItems.map((selected) => {
-      var _a2;
-      const path = selected.el ? this.resolveItemPath(selected.el) : (_a2 = selected.file) == null ? void 0 : _a2.path;
-      const file = path ? this.host.app.vault.getAbstractFileByPath(path) : selected.file;
-      return file ? { el: selected.el, file } : null;
-    }).filter((item) => !!item);
-    const nonNestedItems = resolved.filter(
-      (selected) => !resolved.some(
-        (selectedFolder) => selectedFolder.file instanceof import_obsidian11.TFolder && selectedFolder.file.path !== selected.file.path && selected.file.path.startsWith(selectedFolder.file.path + "/")
-      )
-    );
-    return nonNestedItems.sort((a, b) => {
-      if (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING)
-        return -1;
-      if (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_PRECEDING)
-        return 1;
-      return 0;
-    });
-  }
-  resolveNewPath(item, newParentPath) {
-    var _a, _b, _c;
-    const prefix = newParentPath === "/" ? "" : `${newParentPath}/`;
-    let newPath = `${prefix}${item.name}`;
-    const isPathChanged = item.path !== newPath;
-    const vault = (_a = this.host.app) == null ? void 0 : _a.vault;
-    const duplicate = (_c = (_b = vault == null ? void 0 : vault.getAbstractFileByPathInsensitive) == null ? void 0 : _b.call(vault, newPath)) != null ? _c : null;
-    if (isPathChanged && duplicate) {
-      if (item instanceof import_obsidian11.TFile) {
-        const basePath = newPath.slice(0, -(item.extension.length + 1));
-        newPath = vault.getAvailablePath(basePath, item.extension);
-      } else if (item instanceof import_obsidian11.TFolder) {
-        newPath = vault.getAvailablePath(newPath, "");
-      }
-    }
-    return newPath;
-  }
-  moveItem(draggedItem, newPath, folderPath, siblingPath, insertSide) {
-    var _a, _b;
-    const folderSettings = this.host.getSettings().items[folderPath];
-    if (draggedItem.path === newPath && (folderSettings == null ? void 0 : folderSettings.sortOrder) !== "custom") {
-      return this.log("Already in drop folder with non-custom order, skipping");
-    }
-    this.host.orderManager.move(draggedItem.path, newPath, siblingPath != null ? siblingPath : void 0, insertSide);
-    void ((_b = (_a = this.host.app) == null ? void 0 : _a.fileManager) == null ? void 0 : _b.renameFile(draggedItem, newPath));
-  }
-  startAutoscroll() {
-    if (!this.autoscrollRaf)
-      this.autoscrollRaf = window.requestAnimationFrame(this.handleAutoscroll);
-  }
-  stopAutoscroll() {
-    window.cancelAnimationFrame(this.autoscrollRaf);
-    this.autoscrollRaf = 0;
-  }
-  resolveScrollSpeed(distToEdge) {
-    return (1 - distToEdge / this.autoscrollZoneHeight) ** 2 * this.edgeScrollSpeed;
-  }
-  scheduleFolderExpand(folderEl) {
-    this.clearPendingExpand();
-    this.expandTarget = folderEl;
-    this.expandTimeout = window.setTimeout(() => {
-      var _a, _b;
-      const folderPath = this.resolveItemPath(folderEl);
-      if (!folderPath)
-        return;
-      const view = this.getExplorerViewFor(this.explorerEl);
-      const folderItem = (_a = view == null ? void 0 : view.fileItems) == null ? void 0 : _a[folderPath];
-      void ((_b = folderItem == null ? void 0 : folderItem.setCollapsed) == null ? void 0 : _b.call(folderItem, false, true));
-      this.log(`Folder '${folderPath}' expanded after timeout`);
-    }, this.expandDelay);
-  }
-  clearPendingExpand() {
-    window.clearTimeout(this.expandTimeout);
-    this.expandTarget = null;
-  }
 };
 
 // src/core/indicator.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian16 = require("obsidian");
 function mountIndicator(item, itemSettings, isPatternHidden) {
   var _a, _b;
   if (!(item == null ? void 0 : item.coverEl))
@@ -3662,7 +5263,7 @@ function mountIndicator(item, itemSettings, isPatternHidden) {
     const pinEl = indicatorEl.querySelector(".kb-pin-indicator");
     if (isPinned && !pinEl) {
       indicatorEl.dataset.state = "pinned";
-      (0, import_obsidian12.setIcon)(indicatorEl.createDiv({ cls: "kb-pin-indicator" }), "pin");
+      (0, import_obsidian16.setIcon)(indicatorEl.createDiv({ cls: "kb-pin-indicator" }), "pin");
     } else if (!isPinned && pinEl) {
       indicatorEl.empty();
       indicatorEl.dataset.state = "none";
@@ -3677,54 +5278,77 @@ function mountIndicator(item, itemSettings, isPatternHidden) {
 // src/core/explorer-manager.ts
 var EXPLORER_SELECTOR = '[data-type="file-explorer"] > .nav-files-container';
 var ExplorerManager = class {
-  constructor(getSettings, getExplorerView, isPatternHidden) {
+  constructor(getSettings, getExplorerViews, isPatternHidden) {
     this.getSettings = getSettings;
-    this.getExplorerView = getExplorerView;
+    this.getExplorerViews = getExplorerViews;
     this.isPatternHidden = isPatternHidden;
     this.log = initLog("EXPLORER MANAGER", "#FF3B55");
     this.observers = [];
-    this.indicatorObserver = null;
+    this.indicatorObservers = /* @__PURE__ */ new Map();
   }
-  /** 监听文件浏览器的挂载。checkExisting=true 时先查已存在的；watch=true 时重复监听 */
+  /** 监听所有文件浏览器容器的挂载；watch=true 时持续观察后续新建（重建/多面板） */
   observeExplorerMount(onMount, { checkExisting = false, watch = false } = {}) {
-    let mountedEl = null;
-    if (checkExisting) {
-      const explorerEl = document.querySelector(EXPLORER_SELECTOR);
-      if (explorerEl) {
-        mountedEl = explorerEl;
-        onMount(explorerEl);
-        if (!watch)
-          return;
+    const mounted = /* @__PURE__ */ new Set();
+    const scan = () => {
+      for (const el of [...mounted]) {
+        if (!el.isConnected)
+          mounted.delete(el);
       }
-    }
-    const observer = new MutationObserver(() => {
-      if (mountedEl == null ? void 0 : mountedEl.isConnected)
-        return;
-      const explorerEl = document.querySelector(EXPLORER_SELECTOR);
-      if (!explorerEl)
-        return;
-      mountedEl = explorerEl;
-      onMount(explorerEl);
-      if (!watch)
-        this.disconnectObserver(observer);
+      document.querySelectorAll(EXPLORER_SELECTOR).forEach((el) => {
+        if (mounted.has(el))
+          return;
+        mounted.add(el);
+        onMount(el);
+      });
+    };
+    if (checkExisting)
+      scan();
+    if (!watch)
+      return;
+    const observer = new MutationObserver((mutations) => {
+      let changed = false;
+      for (const record of mutations) {
+        for (const node of Array.from(record.addedNodes)) {
+          if (!(node instanceof HTMLElement))
+            continue;
+          if (node.matches(EXPLORER_SELECTOR) || node.querySelector(EXPLORER_SELECTOR)) {
+            changed = true;
+            break;
+          }
+        }
+        if (changed)
+          break;
+      }
+      if (!changed) {
+        for (const el of mounted) {
+          if (!el.isConnected) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      if (changed)
+        scan();
     });
     observer.observe(document.body, { childList: true, subtree: true });
     this.observers.push(observer);
   }
-  /** 同步所有条目的置顶图钉与隐藏态 */
+  /** 同步所有面板、所有条目的置顶图钉与隐藏态 */
   syncIndicators() {
-    const view = this.getExplorerView();
-    if (!(view == null ? void 0 : view.fileItems))
-      return;
+    const views = this.getExplorerViews();
     const settings = this.getSettings();
     let applied = 0;
-    Object.values(view.fileItems).forEach((item) => {
-      var _a;
-      if (!((_a = item == null ? void 0 : item.file) == null ? void 0 : _a.path))
-        return;
-      mountIndicator(item, settings.items[item.file.path], this.isPatternHidden(item.file.path));
-      applied++;
-    });
+    for (const view of views) {
+      if (!(view == null ? void 0 : view.fileItems))
+        continue;
+      Object.values(view.fileItems).forEach((item) => {
+        var _a;
+        if (!((_a = item == null ? void 0 : item.file) == null ? void 0 : _a.path))
+          return;
+        mountIndicator(item, settings.items[item.file.path], this.isPatternHidden(item.file.path));
+        applied++;
+      });
+    }
     this.log(`Indicators synced (${applied} items)`);
   }
   /**
@@ -3738,8 +5362,8 @@ var ExplorerManager = class {
    * `view.fileItems`：上万条目时那是一次 8ms 级的整表扫描，拖拽/滚动会明显发涩。
    */
   observeIndicatorSync(el) {
-    var _a;
-    (_a = this.indicatorObserver) == null ? void 0 : _a.disconnect();
+    if (this.indicatorObservers.has(el))
+      return;
     let scheduled = false;
     const replay = () => {
       if (scheduled)
@@ -3752,13 +5376,16 @@ var ExplorerManager = class {
     };
     const observer = new MutationObserver(replay);
     observer.observe(el, { childList: true, subtree: true });
-    this.indicatorObserver = observer;
+    this.indicatorObservers.set(el, observer);
     this.observers.push(observer);
     this.log("Indicator sync observer attached");
   }
   /** 只处理 DOM 里当前存在的行；虚拟列表滚出视口的行不需要状态 */
   syncVisibleIndicators(container) {
-    const view = this.getExplorerView();
+    const view = this.getExplorerViews().find((v) => {
+      var _a;
+      return (_a = v == null ? void 0 : v.containerEl) == null ? void 0 : _a.contains(container);
+    });
     if (!(view == null ? void 0 : view.fileItems))
       return;
     const settings = this.getSettings();
@@ -3775,14 +5402,114 @@ var ExplorerManager = class {
   disconnectObservers() {
     this.observers.forEach((obs) => obs.disconnect());
     this.observers.length = 0;
-    this.indicatorObserver = null;
+    this.indicatorObservers.clear();
     this.log("Observers disconnected");
   }
-  disconnectObserver(observer) {
-    observer.disconnect();
-    const idx = this.observers.indexOf(observer);
-    if (idx !== -1)
-      this.observers.splice(idx, 1);
+};
+
+// src/core/menu.ts
+var import_obsidian17 = require("obsidian");
+var SORT_OPTIONS = [
+  ["\u81EA\u5B9A\u4E49\u987A\u5E8F", "custom"],
+  ["\u540D\u79F0 A \u2192 Z", "byNameAsc"],
+  ["\u540D\u79F0 Z \u2192 A", "byNameDesc"],
+  ["\u521B\u5EFA\u65F6\u95F4 \u65B0 \u2192 \u65E7", "byCreatedTimeDesc"],
+  ["\u521B\u5EFA\u65F6\u95F4 \u65E7 \u2192 \u65B0", "byCreatedTimeAsc"],
+  ["\u4FEE\u6539\u65F6\u95F4 \u65B0 \u2192 \u65E7", "byModifiedTimeDesc"],
+  ["\u4FEE\u6539\u65F6\u95F4 \u65E7 \u2192 \u65B0", "byModifiedTimeAsc"]
+];
+function populateFileMenu(menu, file, host) {
+  const fileSettings = host.ensureItemSettings(file);
+  if (file instanceof import_obsidian17.TFolder) {
+    const folderSettings = fileSettings;
+    menu.addItem((item) => {
+      var _a, _b;
+      item.setTitle("\u6392\u5E8F\u65B9\u5F0F").setIcon("sort-asc");
+      const submenu = (_b = (_a = item.setSubmenu) == null ? void 0 : _a.call(item)) != null ? _b : menu;
+      populateSortMenu(submenu, folderSettings.sortOrder, host, file.path, folderSettings);
+    });
+  }
+  menu.addItem(
+    (item) => item.setTitle(fileSettings.isPinned ? "\u53D6\u6D88\u7F6E\u9876" : "\u7F6E\u9876").setIcon(fileSettings.isPinned ? "pin-off" : "pin").onClick(() => {
+      var _a;
+      fileSettings.isPinned = !fileSettings.isPinned;
+      if (fileSettings.isPinned)
+        host.orderManager.move(file.path, file.path);
+      void host.saveSettingsNow();
+      host.sortExplorer();
+      host.syncIndicators();
+      (_a = host.onChanged) == null ? void 0 : _a.call(host);
+    })
+  );
+  menu.addItem(
+    (item) => item.setTitle(fileSettings.isHidden ? "\u53D6\u6D88\u9690\u85CF" : "\u9690\u85CF").setIcon(fileSettings.isHidden ? "eye" : "eye-off").onClick(() => {
+      var _a;
+      fileSettings.isHidden = !fileSettings.isHidden;
+      void host.saveSettingsNow();
+      host.syncIndicators();
+      (_a = host.onChanged) == null ? void 0 : _a.call(host);
+    })
+  );
+}
+function populateSortMenu(menu, currentSortOrder, host, folderPath, folderSettings) {
+  SORT_OPTIONS.forEach(([title, sortOrder]) => {
+    menu.addItem(
+      (item) => item.setTitle(title).setChecked(currentSortOrder === sortOrder).onClick(() => {
+        var _a;
+        folderSettings.sortOrder = sortOrder;
+        void host.saveSettingsNow();
+        host.sortExplorer();
+        (_a = host.onChanged) == null ? void 0 : _a.call(host);
+      })
+    );
+  });
+  menu.addSeparator().addItem(
+    (item) => item.setTitle("\u5C06\u5F53\u524D\u987A\u5E8F\u4FDD\u5B58\u4E3A\u81EA\u5B9A\u4E49\u987A\u5E8F").onClick(() => {
+      new OrderConfirmModal(host.app, (isConfirmed) => {
+        var _a;
+        if (folderSettings.sortOrder === "custom" || !isConfirmed)
+          return;
+        const folder = host.app.vault.getAbstractFileByPath(folderPath);
+        if (!(folder instanceof import_obsidian17.TFolder))
+          return;
+        const sortedItems = host.orderManager.getSortedItems(
+          folderSettings,
+          folder.children.map((file) => ({ file }))
+        );
+        folderSettings.customOrder = sortedItems.map((i) => i.file.name);
+        folderSettings.sortOrder = "custom";
+        void host.saveSettingsNow();
+        host.sortExplorer();
+        (_a = host.onChanged) == null ? void 0 : _a.call(host);
+      }).open();
+    })
+  );
+  return menu;
+}
+var OrderConfirmModal = class extends import_obsidian17.Modal {
+  constructor(app, onResult) {
+    super(app);
+    this.onResult = onResult;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "\u4FDD\u5B58\u4E3A\u81EA\u5B9A\u4E49\u987A\u5E8F" });
+    contentEl.createEl("p", {
+      cls: "kb-modal-desc",
+      text: "\u5C06\u5F53\u524D\u6392\u5E8F\u7ED3\u679C\u56FA\u5316\u4E3A\u81EA\u5B9A\u4E49\u987A\u5E8F\uFF0C\u4E4B\u540E\u53EF\u7528\u62D6\u62FD\u624B\u52A8\u8C03\u6574\u3002"
+    });
+    const btns = contentEl.createDiv({ cls: "kb-modal-buttons" });
+    btns.createEl("button", { text: "\u786E\u5B9A", cls: "mod-cta" }).onclick = () => {
+      this.close();
+      this.onResult(true);
+    };
+    btns.createEl("button", { text: "\u53D6\u6D88" }).onclick = () => {
+      this.close();
+      this.onResult(false);
+    };
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 
@@ -3816,22 +5543,22 @@ var SortFeature = class {
     this.patcher = new Patcher(
       () => this.getSettings(),
       this.orderManager,
-      () => this.getExplorerView(),
+      () => this.getExplorerViews(),
       () => this.syncIndicators()
     );
-    const dndHost = {
+    this.nativeSurface = new NativeTreeSurface(this.app);
+    this.dndController = new TreeDndController({
       app: this.app,
       orderManager: this.orderManager,
       getSettings: () => this.getSettings(),
-      getExplorerView: () => this.getExplorerView(),
-      sortExplorer: () => this.sortExplorer(),
-      syncIndicators: () => this.syncIndicators(),
-      getItemSettings: (path) => this.getItemSettings(path)
-    };
-    this.dndEngine = new DndEngine(dndHost);
+      getItemSettings: (path) => this.getItemSettings(path),
+      resolveSource: (target) => this.nativeSurface.resolveDragSource(target),
+      resolveTargetSurface: (active, point) => this.nativeSurface.resolveSurfaceAt(active, point)
+    });
+    this.dndEngine = new DndEngine(this.dndController, this.nativeSurface);
     this.explorerManager = new ExplorerManager(
       () => this.getSettings(),
-      () => this.getExplorerView(),
+      () => this.getExplorerViews(),
       (path) => this.hideManager.isPatternHidden(path)
     );
   }
@@ -3919,8 +5646,9 @@ var SortFeature = class {
    * 由调用方用 this.registerEvent() 包装，确保卸载时被自动摘除。
    *
    * @param register 由 Plugin 提供的注册函数，通常是 (ref) => this.registerEvent(ref)
+   * @param onMenuChanged 菜单里的置顶/隐藏/排序变化后的刷新回调
    */
-  registerVaultEvents(register) {
+  registerVaultEvents(register, onMenuChanged) {
     const track = (ref) => {
       this.vaultEventRefs.push(ref);
       register(ref);
@@ -3967,7 +5695,7 @@ var SortFeature = class {
     );
     track(
       this.app.workspace.on("file-menu", (menu, file) => {
-        this.addFileMenuItems(menu, file);
+        this.addFileMenuItems(menu, file, onMenuChanged);
       })
     );
   }
@@ -3976,20 +5704,32 @@ var SortFeature = class {
    * 原生树靠上面的 file-menu 事件复用；插件自己的树直接调用，
    * 不再走全局广播 —— 广播里 Obsidian 注入的那几条在本插件菜单中并不生效。
    */
-  addFileMenuItems(menu, file) {
+  addFileMenuItems(menu, file, onChanged) {
     if (!file || file.path === "/")
       return;
-    const host = {
+    populateFileMenu(menu, file, this.menuHost(onChanged));
+  }
+  /** 只注入「排序方式」，用于库根空白右键（不显示根文件夹的置顶/隐藏） */
+  addSortOnly(menu, folder, onChanged) {
+    const settings = this.ensureFolderSettings(folder.path);
+    menu.addItem((entry) => {
+      var _a, _b;
+      entry.setTitle("\u6392\u5E8F\u65B9\u5F0F").setIcon("sort-asc");
+      const submenu = (_b = (_a = entry.setSubmenu) == null ? void 0 : _a.call(entry)) != null ? _b : menu;
+      populateSortMenu(submenu, settings.sortOrder, this.menuHost(onChanged), folder.path, settings);
+    });
+  }
+  menuHost(onChanged) {
+    return {
       settings: this.getSettings(),
       ensureItemSettings: (f) => this.ensureItemSettings(f),
       app: this.app,
       orderManager: this.orderManager,
-      getExplorerView: () => this.getExplorerView(),
       sortExplorer: () => this.sortExplorer(),
       syncIndicators: () => this.syncIndicators(),
-      saveSettingsNow: () => this.saveNow()
+      saveSettingsNow: () => this.saveNow(),
+      onChanged
     };
-    populateFileMenu(menu, file, host);
   }
   /**
    * 隐藏规则（手动隐藏 或 glob 命中）是否命中该路径。
@@ -4036,13 +5776,13 @@ var SortFeature = class {
    */
   ensureItemSettings(file) {
     var _a, _b;
-    if (file instanceof import_obsidian13.TFolder)
+    if (file instanceof import_obsidian18.TFolder)
       return this.ensureFolderSettings(file.path);
     const items = this.getSettings().items;
     const cur = items[file.path];
     if (cur)
       return cur;
-    const stat = file instanceof import_obsidian13.TFile ? file.stat : null;
+    const stat = file instanceof import_obsidian18.TFile ? file.stat : null;
     const created = {
       isPinned: false,
       isHidden: false,
@@ -4063,8 +5803,12 @@ var SortFeature = class {
     logger.level = enabled ? "debug" : "silent";
   }
   getExplorerView() {
-    const leaves = this.app.workspace.getLeavesOfType("file-explorer");
-    return leaves.length > 0 ? leaves[0].view : null;
+    var _a;
+    return (_a = this.getExplorerViews()[0]) != null ? _a : null;
+  }
+  /** 侧栏/主区域可能同时存在多个 Files 面板，全部返回 */
+  getExplorerViews() {
+    return this.app.workspace.getLeavesOfType("file-explorer").map((leaf) => leaf.view);
   }
   sortExplorer() {
     this.patcher.sortExplorer();
@@ -4096,7 +5840,7 @@ var SortOrderFeature = class {
       ctx.saveDebounced,
       ctx.save
     );
-    this.engine.registerVaultEvents((ref) => ctx.registerEvent(ref));
+    this.engine.registerVaultEvents((ref) => ctx.registerEvent(ref), () => ctx.refreshViews());
     this.engine.syncRuntimeSettings();
     this.engine.suspend();
     ctx.onLayoutReady(() => {
@@ -4129,7 +5873,7 @@ var SortOrderFeature = class {
       cls: "kb-setting-hint",
       text: "\u4EE5\u4E0B\u529F\u80FD\u4F5C\u7528\u4E8E Obsidian \u539F\u751F\u6587\u4EF6\u6D4F\u89C8\u5668\u3002\u5728\u6587\u4EF6/\u6587\u4EF6\u5939\u4E0A\u53F3\u952E\u5373\u53EF\u7F6E\u9876\u3001\u9690\u85CF\u3001\u8BBE\u7F6E\u6392\u5E8F\u65B9\u5F0F\uFF1B\u76F4\u63A5\u62D6\u62FD\u6761\u76EE\u53EF\u624B\u52A8\u8C03\u6574\u987A\u5E8F\u3002"
     });
-    new import_obsidian14.Setting(containerEl).setName("\u663E\u793A\u88AB\u9690\u85CF\u7684\u6587\u4EF6").setDesc("\u6253\u5F00\u540E\uFF0C\u88AB\u9690\u85CF\u7684\u6587\u4EF6\u4F1A\u4EE5\u534A\u900F\u660E\u65B9\u5F0F\u663E\u793A\u51FA\u6765\uFF08\u4EC5\u4E34\u65F6\u67E5\u770B\uFF0C\u6062\u590D\u5355\u4E2A\u6587\u4EF6\u8BF7\u7528\u4E0B\u65B9\u7684\u5217\u8868\uFF09").addToggle(
+    new import_obsidian19.Setting(containerEl).setName("\u663E\u793A\u88AB\u9690\u85CF\u7684\u6587\u4EF6").setDesc("\u6253\u5F00\u540E\uFF0C\u88AB\u9690\u85CF\u7684\u6587\u4EF6\u4F1A\u4EE5\u534A\u900F\u660E\u65B9\u5F0F\u663E\u793A\u51FA\u6765\uFF08\u4EC5\u4E34\u65F6\u67E5\u770B\uFF0C\u6062\u590D\u5355\u4E2A\u6587\u4EF6\u8BF7\u7528\u4E0B\u65B9\u7684\u5217\u8868\uFF09").addToggle(
       (t) => t.setValue(order().showHidden).onChange(async (v) => {
         var _a, _b;
         order().showHidden = v;
@@ -4140,7 +5884,7 @@ var SortOrderFeature = class {
       })
     );
     this.renderHiddenItemsList(containerEl, ctx);
-    new import_obsidian14.Setting(containerEl).setName("\u65B0\u5EFA\u6587\u4EF6\u63D2\u5165\u4F4D\u7F6E").setDesc("\u65B0\u5EFA\u7684\u6587\u4EF6/\u6587\u4EF6\u5939\u653E\u5728\u5217\u8868\u9876\u90E8\u8FD8\u662F\u5E95\u90E8").addDropdown((d) => {
+    new import_obsidian19.Setting(containerEl).setName("\u65B0\u5EFA\u6587\u4EF6\u63D2\u5165\u4F4D\u7F6E").setDesc("\u65B0\u5EFA\u7684\u6587\u4EF6/\u6587\u4EF6\u5939\u653E\u5728\u5217\u8868\u9876\u90E8\u8FD8\u662F\u5E95\u90E8").addDropdown((d) => {
       d.addOption("top", "\u9876\u90E8");
       d.addOption("bottom", "\u5E95\u90E8");
       d.setValue(order().newItemPlacement).onChange(async (v) => {
@@ -4149,14 +5893,14 @@ var SortOrderFeature = class {
         ctx.refreshViews();
       });
     });
-    new import_obsidian14.Setting(containerEl).setName("\u589E\u5220\u65F6\u4FDD\u6301\u987A\u5E8F").setDesc("\u65B0\u5EFA\u6216\u5220\u9664\u6587\u4EF6\u540E\uFF0C\u4FDD\u7559\u5176\u4F59\u6761\u76EE\u7684\u81EA\u5B9A\u4E49\u987A\u5E8F").addToggle(
+    new import_obsidian19.Setting(containerEl).setName("\u589E\u5220\u65F6\u4FDD\u6301\u987A\u5E8F").setDesc("\u65B0\u5EFA\u6216\u5220\u9664\u6587\u4EF6\u540E\uFF0C\u4FDD\u7559\u5176\u4F59\u6761\u76EE\u7684\u81EA\u5B9A\u4E49\u987A\u5E8F").addToggle(
       (t) => t.setValue(order().persistOrderOnCreateDelete).onChange(async (v) => {
         order().persistOrderOnCreateDelete = v;
         await ctx.save();
         ctx.refreshViews();
       })
     );
-    new import_obsidian14.Setting(containerEl).setName("\u9690\u85CF\u89C4\u5219\uFF08glob\uFF09").setHeading();
+    new import_obsidian19.Setting(containerEl).setName("\u9690\u85CF\u89C4\u5219\uFF08glob\uFF09").setHeading();
     containerEl.createEl("p", {
       cls: "kb-setting-hint",
       text: "\u6BCF\u884C\u4E00\u6761\u89C4\u5219\uFF0C\u652F\u6301 gitignore \u98CE\u683C\u901A\u914D\u7B26\u3002\u4F8B\u5982\uFF1A*.tmp \u9690\u85CF\u6240\u6709 tmp \u6587\u4EF6\uFF1B\u8349\u7A3F/** \u9690\u85CF\u300C\u8349\u7A3F\u300D\u6587\u4EF6\u5939\uFF1B/\u79C1\u5BC6.md \u53EA\u9690\u85CF\u6839\u76EE\u5F55\u4E0B\u7684\u300C\u79C1\u5BC6.md\u300D\u3002"
@@ -4173,8 +5917,8 @@ var SortOrderFeature = class {
       (_b = engine()) == null ? void 0 : _b.syncIndicators();
       (_c = engine()) == null ? void 0 : _c.sortExplorer();
     });
-    new import_obsidian14.Setting(containerEl).setName("\u8C03\u8BD5").setHeading();
-    new import_obsidian14.Setting(containerEl).setName("\u5F00\u542F\u8C03\u8BD5\u65E5\u5FD7").setDesc("\u5728\u5F00\u53D1\u8005\u63A7\u5236\u53F0\u8F93\u51FA\u8BE6\u7EC6\u65E5\u5FD7\uFF0C\u6392\u67E5\u95EE\u9898\u65F6\u4F7F\u7528").addToggle(
+    new import_obsidian19.Setting(containerEl).setName("\u8C03\u8BD5").setHeading();
+    new import_obsidian19.Setting(containerEl).setName("\u5F00\u542F\u8C03\u8BD5\u65E5\u5FD7").setDesc("\u5728\u5F00\u53D1\u8005\u63A7\u5236\u53F0\u8F93\u51FA\u8BE6\u7EC6\u65E5\u5FD7\uFF0C\u6392\u67E5\u95EE\u9898\u65F6\u4F7F\u7528").addToggle(
       (t) => t.setValue(order().debugMode).onChange(async (v) => {
         var _a;
         order().debugMode = v;
@@ -4190,7 +5934,7 @@ var SortOrderFeature = class {
    * 这样用户不必先打开全局「显示被隐藏的文件」再在半透明条目里翻找。
    */
   renderHiddenItemsList(containerEl, ctx) {
-    new import_obsidian14.Setting(containerEl).setName("\u5DF2\u9690\u85CF\u7684\u9879\u76EE").setHeading();
+    new import_obsidian19.Setting(containerEl).setName("\u5DF2\u9690\u85CF\u7684\u9879\u76EE").setHeading();
     const items = ctx.settings().order.items;
     const hiddenPaths = Object.keys(items).filter((p) => {
       var _a;
@@ -4212,7 +5956,7 @@ var SortOrderFeature = class {
       const exists = !!ctx.app.vault.getAbstractFileByPath(path);
       const basename = path.substring(path.lastIndexOf("/") + 1) || path;
       const parentPath = path.substring(0, path.lastIndexOf("/")) || "/";
-      const row = new import_obsidian14.Setting(listEl).setName(basename).setDesc(exists ? parentPath : `\uFF08\u5DF2\u4E0D\u5B58\u5728\uFF09${parentPath}`);
+      const row = new import_obsidian19.Setting(listEl).setName(basename).setDesc(exists ? parentPath : `\uFF08\u5DF2\u4E0D\u5B58\u5728\uFF09${parentPath}`);
       row.addButton(
         (b) => b.setButtonText("\u6062\u590D").setTooltip(exists ? "\u53D6\u6D88\u9690\u85CF\uFF0C\u8BA9\u6B64\u9879\u91CD\u65B0\u663E\u793A" : "\u6587\u4EF6\u5DF2\u4E0D\u5B58\u5728\uFF0C\u4EC5\u6E05\u9664\u9690\u85CF\u8BB0\u5F55").onClick(async () => {
           var _a, _b;
@@ -4225,7 +5969,7 @@ var SortOrderFeature = class {
         })
       );
     }
-    new import_obsidian14.Setting(containerEl).setName("\u5168\u90E8\u6062\u590D").setDesc("\u53D6\u6D88\u9690\u85CF\u6240\u6709\u9879\u76EE").addButton(
+    new import_obsidian19.Setting(containerEl).setName("\u5168\u90E8\u6062\u590D").setDesc("\u53D6\u6D88\u9690\u85CF\u6240\u6709\u9879\u76EE").addButton(
       (b) => b.setButtonText("\u5168\u90E8\u6062\u590D").setWarning().onClick(async () => {
         var _a, _b;
         for (const p of hiddenPaths) {
@@ -4243,14 +5987,11 @@ var SortOrderFeature = class {
 };
 
 // src/main.ts
-var KbHomePlugin = class extends import_obsidian15.Plugin {
+var KbHomePlugin = class extends import_obsidian20.Plugin {
   constructor() {
     super(...arguments);
     /** 工作区就绪后要跑的装配期回调（功能用 ctx.onLayoutReady 排进来） */
     this.layoutReadyQueue = [];
-    /** 旧分组迁移进行中（防止重复触发） */
-    this.migrating = false;
-    this.migrationModal = null;
     /** 是否应从列表里彻底不出现（卡片墙用；与原生树共用同一套隐藏规则与开关） */
     this.isHiddenForList = (path) => {
       var _a, _b;
@@ -4291,22 +6032,12 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     this.refreshViews();
   }
   // ============ 分组（真实文件夹） ============
-  /** 是否还有旧版虚拟分组没迁移 */
-  hasLegacyGroupDefs() {
-    return hasLegacyGroups(this.settings);
-  }
-  /** 新建分组：迁移完成时创建真实文件夹；仍有旧虚拟分组时沿用旧行为 */
+  /** 新建分组：在 vault 根目录创建真实文件夹 */
   async createGroup(name) {
     const trimmed = name.trim();
     if (!trimmed)
       throw new Error("\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
     const settings = this.settings;
-    if (this.hasLegacyGroupDefs()) {
-      const group2 = { id: genGroupId(), name: trimmed, order: [] };
-      settings.groups.push(group2);
-      await this.saveSettingsNow();
-      return group2;
-    }
     const path = await createGroupFolder(this.app, trimmed);
     const group = {
       id: genGroupId(),
@@ -4320,18 +6051,12 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     this.refreshViews();
     return group;
   }
-  /** 重命名分组：有真实文件夹时连文件夹一起改名 */
+  /** 重命名分组：文件夹一起改名 */
   async renameGroup(group, rawName) {
     const name = rawName.trim();
     if (!name)
       throw new Error("\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
     const settings = this.settings;
-    if (!group.path) {
-      group.name = safeFolderName(name);
-      await this.saveSettingsNow();
-      this.refreshViews();
-      return;
-    }
     const folder = getFolder(this.app, group.path);
     if (!folder)
       throw new Error("\u5206\u7EC4\u6587\u4EF6\u5939\u4E0D\u5B58\u5728");
@@ -4348,21 +6073,10 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     await this.saveSettingsNow();
     this.refreshViews();
   }
-  /** 删除分组：组内知识库移回根目录，再删除空文件夹；旧虚拟组只改配置 */
+  /** 删除分组：组内知识库移回根目录，再删除空文件夹 */
   async dissolveGroup(group) {
     var _a;
     const settings = this.settings;
-    if (!group.path) {
-      for (const path of group.order) {
-        if (!settings.ungroupedOrder.includes(path))
-          settings.ungroupedOrder.push(path);
-      }
-      settings.groups = settings.groups.filter((g) => g.id !== group.id);
-      reconcileGroupOrders(this.app, settings);
-      await this.saveSettingsNow();
-      this.refreshViews();
-      return { moved: 0, errors: [], folderDeleted: true };
-    }
     const result = await dissolveGroup(this.app, settings, group);
     await this.saveSettingsNow();
     this.refreshViews();
@@ -4371,7 +6085,7 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
   }
   /**
    * 把知识库移入某个分组（groupId=null 表示移回根目录，即未分组）。
-   * 新版分组会真实移动文件夹；返回移动后的路径。
+   * 分组都是真实文件夹，操作会真实移动文件夹；返回移动后的路径。
    */
   async moveKbToGroup(kbPath, groupId) {
     var _a, _b;
@@ -4382,36 +6096,16 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     const target = groupId ? settings.groups.find((g) => g.id === groupId) : null;
     if (groupId && !target)
       return kbPath;
-    const currentGroup = currentId ? settings.groups.find((g) => g.id === currentId) : null;
-    const targetIsLegacy = !!target && !target.path;
-    const currentIsLegacy = !!currentGroup && !currentGroup.path;
-    if (targetIsLegacy || !target && currentIsLegacy) {
-      if (targetIsLegacy && !currentIsLegacy) {
-        new import_obsidian15.Notice("\u76EE\u6807\u5206\u7EC4\u8FD8\u6CA1\u6709\u771F\u5B9E\u6587\u4EF6\u5939\uFF0C\u8BF7\u5148\u5B8C\u6210\u65E7\u5206\u7EC4\u8FC1\u79FB");
-        return kbPath;
-      }
-      for (const g of settings.groups) {
-        g.order = g.order.filter((p) => p !== kbPath);
-      }
-      settings.ungroupedOrder = settings.ungroupedOrder.filter((p) => p !== kbPath);
-      if (target)
-        target.order.push(kbPath);
-      else
-        settings.ungroupedOrder.push(kbPath);
-      await this.saveSettingsNow();
-      this.refreshViews();
-      return kbPath;
-    }
     const source = getFolder(this.app, kbPath);
     if (!source) {
-      new import_obsidian15.Notice("\u77E5\u8BC6\u5E93\u6587\u4EF6\u5939\u4E0D\u5B58\u5728");
+      new import_obsidian20.Notice("\u77E5\u8BC6\u5E93\u6587\u4EF6\u5939\u4E0D\u5B58\u5728");
       return kbPath;
     }
     let parentPath = "/";
-    if (target == null ? void 0 : target.path) {
+    if (target) {
       const targetFolder = getFolder(this.app, target.path);
       if (!targetFolder) {
-        new import_obsidian15.Notice("\u76EE\u6807\u5206\u7EC4\u6587\u4EF6\u5939\u4E0D\u5B58\u5728");
+        new import_obsidian20.Notice("\u76EE\u6807\u5206\u7EC4\u6587\u4EF6\u5939\u4E0D\u5B58\u5728");
         return kbPath;
       }
       parentPath = targetFolder.path;
@@ -4422,7 +6116,7 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     try {
       await this.app.fileManager.renameFile(source, newPath);
     } catch (err) {
-      new import_obsidian15.Notice("\u79FB\u52A8\u5931\u8D25\uFF1A" + String(err));
+      new import_obsidian20.Notice("\u79FB\u52A8\u5931\u8D25\uFF1A" + String(err));
       return kbPath;
     }
     migrateSettingsPaths(settings, kbPath, newPath);
@@ -4432,40 +6126,6 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     this.refreshViews();
     return newPath;
   }
-  /** 执行旧虚拟分组迁移（供弹窗 / 命令 / 设置页调用） */
-  async migrateLegacyGroupsNow(onProgress) {
-    var _a;
-    if (this.migrating || !this.hasLegacyGroupDefs())
-      return null;
-    this.migrating = true;
-    try {
-      const result = await migrateLegacyGroups(this.app, this.settings, onProgress);
-      reconcileGroupOrders(this.app, this.settings);
-      await this.saveSettingsNow();
-      this.refreshViews();
-      (_a = this.settingTab) == null ? void 0 : _a.display();
-      return result;
-    } finally {
-      this.migrating = false;
-    }
-  }
-  openMigrationModal() {
-    if (this.migrating) {
-      new import_obsidian15.Notice("\u6B63\u5728\u8FC1\u79FB\uFF0C\u8BF7\u7A0D\u5019");
-      return;
-    }
-    if (!this.hasLegacyGroupDefs()) {
-      new import_obsidian15.Notice("\u6CA1\u6709\u9700\u8981\u8FC1\u79FB\u7684\u65E7\u5206\u7EC4");
-      return;
-    }
-    if (this.migrationModal)
-      return;
-    this.migrationModal = new MigrationModal(this.app, this);
-    this.migrationModal.open();
-  }
-  closeMigrationModal() {
-    this.migrationModal = null;
-  }
   /** 文件夹改名 / 移动后，单库树当前路径跟着走 */
   notifyTreePathRenamed(oldPath, newPath) {
     var _a, _b;
@@ -4474,13 +6134,7 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     }
   }
   handleVaultRename(file, oldPath) {
-    if (this.migrating) {
-      if (file instanceof import_obsidian15.TFolder)
-        this.notifyTreePathRenamed(oldPath, file.path);
-      this.refreshViews();
-      return;
-    }
-    if (file instanceof import_obsidian15.TFolder) {
+    if (file instanceof import_obsidian20.TFolder) {
       const changed = migrateSettingsPaths(this.settings, oldPath, file.path);
       const reconciled = reconcileGroupOrders(this.app, this.settings);
       if (changed || reconciled)
@@ -4490,10 +6144,6 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     this.refreshViews();
   }
   handleStructureChange() {
-    if (this.migrating) {
-      this.refreshViews();
-      return;
-    }
     if (reconcileGroupOrders(this.app, this.settings))
       this.saveSettingsDebounced();
     this.refreshViews();
@@ -4536,16 +6186,11 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
       name: "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0\u6240\u5728\u77E5\u8BC6\u5E93\u7684\u76EE\u5F55",
       callback: () => void this.openTreeForActive()
     });
-    this.addCommand({
-      id: "migrate-legacy-groups",
-      name: "\u8FC1\u79FB\u65E7\u5206\u7EC4\u5230\u771F\u5B9E\u6587\u4EF6\u5939",
-      callback: () => this.openMigrationModal()
-    });
     this.settingTab = new KbSettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
     this.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (file instanceof import_obsidian15.TFolder)
+        if (file instanceof import_obsidian20.TFolder)
           this.handleStructureChange();
         else
           this.refreshViews();
@@ -4553,7 +6198,7 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof import_obsidian15.TFolder)
+        if (file instanceof import_obsidian20.TFolder)
           this.handleStructureChange();
         else
           this.refreshViews();
@@ -4578,12 +6223,6 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
         }
       } catch (err) {
         console.error("[sun-home] \u542F\u52A8\u65F6\u6253\u5F00\u77E5\u8BC6\u5E93\u5217\u8868\u5931\u8D25\uFF1A", err);
-      }
-      try {
-        if (this.hasLegacyGroupDefs())
-          this.openMigrationModal();
-      } catch (err) {
-        console.error("[sun-home] \u6253\u5F00\u5206\u7EC4\u8FC1\u79FB\u63D0\u793A\u5931\u8D25\uFF1A", err);
       }
     });
   }
@@ -4671,7 +6310,7 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
   async openTreeForActive() {
     const active = this.app.workspace.getActiveFile();
     if (!active) {
-      new import_obsidian15.Notice("\u5F53\u524D\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+      new import_obsidian20.Notice("\u5F53\u524D\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
       return;
     }
     const kbs = scanKnowledgeBases(this.app, this.settings, this.isHiddenForList);
@@ -4702,11 +6341,7 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
   // ============ 设置读写 ============
   async loadSettings() {
     var _a, _b;
-    const current = await this.loadData();
-    const hasCurrent = !!current && typeof current === "object" && !Array.isArray(current) && Object.keys(current).length > 0;
-    const loaded = hasCurrent ? current : await this.loadLegacyPluginData();
-    if (loaded)
-      delete loaded.treeOrder;
+    const loaded = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     if (!["border", "gray", "divider"].includes(this.settings.cardStyle)) {
       this.settings.cardStyle = DEFAULT_SETTINGS.cardStyle;
@@ -4717,15 +6352,20 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
       this.settings.overrides = {};
     if (!Array.isArray(this.settings.ungroupedOrder))
       this.settings.ungroupedOrder = [];
-    for (const group of this.settings.groups) {
+    const groupCount = this.settings.groups.length;
+    this.settings.groups = this.settings.groups.filter((group) => {
+      if (!group || typeof group !== "object")
+        return false;
       if (!group.id)
         group.id = genGroupId();
       if (typeof group.name !== "string" || !group.name)
         group.name = "\u672A\u547D\u540D\u5206\u7EC4";
       if (!Array.isArray(group.order))
         group.order = [];
-      if (group.path === "")
-        delete group.path;
+      return typeof group.path === "string" && group.path.length > 0;
+    });
+    if (this.settings.groups.length !== groupCount) {
+      console.warn("[sun-home] \u5DF2\u5FFD\u7565\u6CA1\u6709\u771F\u5B9E\u6587\u4EF6\u5939\u8DEF\u5F84\u7684\u65E7\u5206\u7EC4\u5B9A\u4E49");
     }
     const persistedOrder = this.settings.order || {};
     this.settings.order = {
@@ -4742,26 +6382,6 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
       ...DEFAULT_ADMONITION,
       ...this.settings.admonition || {}
     };
-  }
-  /** 从旧插件 id（kb-home）的 data.json 迁移一次配置 */
-  async loadLegacyPluginData() {
-    const oldPath = joinPath(this.app.vault.configDir, "plugins/kb-home/data.json");
-    try {
-      const adapter = this.app.vault.adapter;
-      if (!await adapter.exists(oldPath))
-        return null;
-      const text = await adapter.read(oldPath);
-      const parsed = JSON.parse(text);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return null;
-      }
-      await this.saveData(parsed);
-      new import_obsidian15.Notice("\u5DF2\u4ECE\u65E7\u63D2\u4EF6\u540D kb-home \u8FC1\u79FB\u914D\u7F6E\u5230 sun-home");
-      return parsed;
-    } catch (err) {
-      console.error("[sun-home] \u8FC1\u79FB\u65E7\u63D2\u4EF6\u914D\u7F6E\u5931\u8D25\uFF1A", err);
-      return null;
-    }
   }
   /**
    * 统一的落盘入口。所有写盘都从这里走，便于集中处理（如过滤挂起的防抖保存）。
@@ -4815,13 +6435,13 @@ var KbHomePlugin = class extends import_obsidian15.Plugin {
     new ConfirmModal(this.app, title, desc, onConfirm).open();
   }
   notice(msg) {
-    new import_obsidian15.Notice(msg);
+    new import_obsidian20.Notice(msg);
   }
   showKbEditModal(kb, onDone) {
     new KbEditModal(this.app, this, kb, onDone).open();
   }
 };
-var InputModal = class extends import_obsidian15.Modal {
+var InputModal = class extends import_obsidian20.Modal {
   constructor(app, title, desc, def, onSubmit, onCancel) {
     super(app);
     this.title = title;
@@ -4868,7 +6488,7 @@ var InputModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var ConfirmModal = class extends import_obsidian15.Modal {
+var ConfirmModal = class extends import_obsidian20.Modal {
   constructor(app, title, desc, onConfirm) {
     super(app);
     this.title = title;
@@ -4893,74 +6513,7 @@ var ConfirmModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var MigrationModal = class extends import_obsidian15.Modal {
-  constructor(app, plugin) {
-    super(app);
-    this.plugin = plugin;
-  }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.createEl("h3", { text: "\u65E7\u5206\u7EC4\u6539\u4E3A\u771F\u5B9E\u6587\u4EF6\u5939" });
-    const plan = planLegacyMigration(this.app, this.plugin.settings);
-    const total = plan.reduce((n, item) => n + item.members.length, 0);
-    contentEl.createEl("p", {
-      cls: "kb-modal-desc",
-      text: `\u68C0\u6D4B\u5230 ${plan.length} \u4E2A\u65E7\u7248\u865A\u62DF\u5206\u7EC4\u3002\u8FC1\u79FB\u4F1A\u4E3A\u6BCF\u4E2A\u5206\u7EC4\u521B\u5EFA\u4E00\u4E2A\u771F\u5B9E\u6587\u4EF6\u5939\uFF0C\u5E76\u628A\u6210\u5458\u77E5\u8BC6\u5E93\u642C\u8FDB\u53BB\uFF1B\u6392\u5E8F\u3001\u9690\u85CF\u3001\u540D\u79F0\u8BB0\u5F55\u4F1A\u540C\u6B65\u66F4\u65B0\uFF0C\u4E0D\u4F1A\u5220\u9664\u4EFB\u4F55\u7B14\u8BB0\u3002`
-    });
-    const list = contentEl.createEl("ul", { cls: "kb-modal-desc" });
-    for (const item of plan) {
-      list.createEl("li", {
-        text: `${item.group.name}\uFF1A${item.members.length} \u4E2A\u77E5\u8BC6\u5E93`
-      });
-    }
-    contentEl.createEl("p", {
-      cls: "kb-modal-desc",
-      text: `\u5171\u4F1A\u79FB\u52A8 ${total} \u4E2A\u77E5\u8BC6\u5E93\u6587\u4EF6\u5939\u3002\u5206\u7EC4\u540D\u4E0E\u73B0\u6709\u6587\u4EF6\u5939\u91CD\u540D\u65F6\u4F1A\u81EA\u52A8\u52A0\u5E8F\u53F7\u3002`
-    });
-    const status = contentEl.createEl("p", { cls: "kb-modal-desc kb-modal-status" });
-    const btns = contentEl.createDiv({ cls: "kb-modal-buttons" });
-    const start = btns.createEl("button", { text: "\u5F00\u59CB\u8FC1\u79FB", cls: "mod-cta" });
-    const later = btns.createEl("button", { text: "\u7A0D\u540E" });
-    later.onclick = () => this.close();
-    start.onclick = async () => {
-      start.disabled = true;
-      later.disabled = true;
-      status.setText("\u6B63\u5728\u8FC1\u79FB\u2026");
-      try {
-        const result = await this.plugin.migrateLegacyGroupsNow(
-          (message) => status.setText(message)
-        );
-        if (!result) {
-          status.setText("\u6CA1\u6709\u9700\u8981\u8FC1\u79FB\u7684\u5206\u7EC4\u3002");
-        } else {
-          const renamed = result.groups.filter((g) => g.renamed);
-          const parts = [
-            `\u8FC1\u79FB\u5B8C\u6210\uFF1A\u521B\u5EFA ${result.groups.length} \u4E2A\u5206\u7EC4\u6587\u4EF6\u5939\uFF0C\u79FB\u52A8 ${result.moved} \u4E2A\u77E5\u8BC6\u5E93\u3002`
-          ];
-          if (renamed.length > 0) {
-            parts.push(
-              "\u56E0\u91CD\u540D\u81EA\u52A8\u6539\u540D\uFF1A" + renamed.map((g) => `${g.name}\uFF08${g.path}\uFF09`).join("\u3001")
-            );
-          }
-          if (result.errors.length > 0) {
-            parts.push("\u6709 " + result.errors.length + " \u9879\u672A\u5B8C\u6210\uFF1A" + result.errors.join("\uFF1B"));
-          }
-          status.setText(parts.join("\n"));
-        }
-      } catch (err) {
-        status.setText("\u8FC1\u79FB\u5931\u8D25\uFF1A" + String(err));
-      }
-      start.remove();
-      later.disabled = false;
-      later.setText("\u5173\u95ED");
-    };
-  }
-  onClose() {
-    this.plugin.closeMigrationModal();
-    this.contentEl.empty();
-  }
-};
-var KbEditModal = class extends import_obsidian15.Modal {
+var KbEditModal = class extends import_obsidian20.Modal {
   constructor(app, plugin, kb, onDone) {
     super(app);
     this.plugin = plugin;
@@ -4975,19 +6528,19 @@ var KbEditModal = class extends import_obsidian15.Modal {
     let name = ((_a = s.overrides[this.kb.path]) == null ? void 0 : _a.name) || this.kb.name;
     let icon = ((_b = s.overrides[this.kb.path]) == null ? void 0 : _b.icon) || this.kb.icon || "";
     let groupId = this.kb.groupId || "";
-    new import_obsidian15.Setting(contentEl).setName("\u663E\u793A\u540D\u79F0").addText(
+    new import_obsidian20.Setting(contentEl).setName("\u663E\u793A\u540D\u79F0").addText(
       (t) => t.setValue(name).onChange((v) => name = v)
     );
-    new import_obsidian15.Setting(contentEl).setName("\u56FE\u6807\uFF08emoji\uFF09").setDesc("\u7559\u7A7A\u4F7F\u7528\u9ED8\u8BA4\u7684\u7EBF\u6027\u4E66\u672C\u56FE\u6807").addText(
+    new import_obsidian20.Setting(contentEl).setName("\u56FE\u6807\uFF08emoji\uFF09").setDesc("\u7559\u7A7A\u4F7F\u7528\u9ED8\u8BA4\u7684\u7EBF\u6027\u4E66\u672C\u56FE\u6807").addText(
       (t) => t.setPlaceholder("\u7559\u7A7A = \u9ED8\u8BA4\u56FE\u6807").setValue(icon).onChange((v) => icon = v)
     );
-    new import_obsidian15.Setting(contentEl).setName("\u6240\u5C5E\u5206\u7EC4").addDropdown((d) => {
+    new import_obsidian20.Setting(contentEl).setName("\u6240\u5C5E\u5206\u7EC4").addDropdown((d) => {
       d.addOption("", "\uFF08\u672A\u5206\u7EC4\uFF09");
       for (const g of s.groups)
         d.addOption(g.id, g.name);
       d.setValue(groupId).onChange((v) => groupId = v);
     });
-    new import_obsidian15.Setting(contentEl).addButton(
+    new import_obsidian20.Setting(contentEl).addButton(
       (b) => b.setButtonText("\u4FDD\u5B58").setCta().onClick(async () => {
         var _a2;
         try {
@@ -5004,14 +6557,14 @@ var KbEditModal = class extends import_obsidian15.Modal {
           this.onDone();
           this.close();
         } catch (err) {
-          new import_obsidian15.Notice("\u4FDD\u5B58\u5931\u8D25\uFF1A" + String(err));
+          new import_obsidian20.Notice("\u4FDD\u5B58\u5931\u8D25\uFF1A" + String(err));
         }
       })
     );
-    new import_obsidian15.Setting(contentEl).addButton(
+    new import_obsidian20.Setting(contentEl).addButton(
       (b) => b.setButtonText("\u5728\u7CFB\u7EDF\u8D44\u6E90\u7BA1\u7406\u5668\u4E2D\u6253\u5F00").onClick(() => {
         if (!revealInSystem(this.app, this.kb.path, "open")) {
-          new import_obsidian15.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6253\u5F00\u6587\u4EF6\u5939");
+          new import_obsidian20.Notice("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6253\u5F00\u6587\u4EF6\u5939");
         }
         this.close();
       })
@@ -5021,7 +6574,7 @@ var KbEditModal = class extends import_obsidian15.Modal {
     this.contentEl.empty();
   }
 };
-var KbSettingTab = class extends import_obsidian15.PluginSettingTab {
+var KbSettingTab = class extends import_obsidian20.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -5029,14 +6582,14 @@ var KbSettingTab = class extends import_obsidian15.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian15.Setting(containerEl).setName("\u77E5\u8BC6\u5E93\u7BA1\u7406\u8BBE\u7F6E").setHeading();
-    new import_obsidian15.Setting(containerEl).setName("\u542F\u52A8\u65F6\u81EA\u52A8\u6253\u5F00\u77E5\u8BC6\u5E93\u5217\u8868").setDesc("\u6253\u5F00 Obsidian \u65F6\uFF0C\u81EA\u52A8\u5728\u4E3B\u533A\u57DF\u5C55\u793A\u77E5\u8BC6\u5E93\u5361\u7247\u5899").addToggle(
+    new import_obsidian20.Setting(containerEl).setName("\u77E5\u8BC6\u5E93\u7BA1\u7406\u8BBE\u7F6E").setHeading();
+    new import_obsidian20.Setting(containerEl).setName("\u542F\u52A8\u65F6\u81EA\u52A8\u6253\u5F00\u77E5\u8BC6\u5E93\u5217\u8868").setDesc("\u6253\u5F00 Obsidian \u65F6\uFF0C\u81EA\u52A8\u5728\u4E3B\u533A\u57DF\u5C55\u793A\u77E5\u8BC6\u5E93\u5361\u7247\u5899").addToggle(
       (t) => t.setValue(this.plugin.settings.openOnStartup).onChange(async (v) => {
         this.plugin.settings.openOnStartup = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian15.Setting(containerEl).setName("\u5361\u7247\u6837\u5F0F").setDesc(
+    new import_obsidian20.Setting(containerEl).setName("\u5361\u7247\u6837\u5F0F").setDesc(
       "\u7EBF\u6846\uFF1A\u7EB8\u9762\u5E95\u8272 + \u7EC6\u8FB9\u6846\uFF1B\u6D45\u7070\uFF1A\u5B9E\u5FC3\u7070\u5E95\uFF0C\u5E93\u5C11\u65F6\u66F4\u6210\u5757\uFF1B\u5206\u9694\u7EBF\uFF1A\u53BB\u6389\u5361\u7247\u6846\uFF0C\u53EA\u7559\u884C\u95F4\u7EC6\u7EBF\uFF0C\u5E93\u591A\u65F6\u6700\u5B89\u9759\u3002"
     ).addDropdown(
       (d) => d.addOption("border", "\u7EBF\u6846").addOption("gray", "\u6D45\u7070\u80CC\u666F").addOption("divider", "\u5206\u9694\u7EBF").setValue(this.plugin.settings.cardStyle).onChange(async (v) => {
@@ -5044,30 +6597,17 @@ var KbSettingTab = class extends import_obsidian15.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian15.Setting(containerEl).setName("\u91CD\u65B0\u626B\u63CF\u77E5\u8BC6\u5E93").setDesc(
+    new import_obsidian20.Setting(containerEl).setName("\u91CD\u65B0\u626B\u63CF\u77E5\u8BC6\u5E93").setDesc(
       "\u5206\u7EC4\u6587\u4EF6\u5939\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939\u3001\u4EE5\u53CA\u6839\u76EE\u5F55\u4E0B\u672A\u767B\u8BB0\u4E3A\u5206\u7EC4\u7684\u6587\u4EF6\u5939\uFF0C\u90FD\u4F1A\u8BC6\u522B\u4E3A\u77E5\u8BC6\u5E93\uFF1B\u88AB\u300C\u9690\u85CF\u300D\u89C4\u5219\u6321\u6389\u7684\u6587\u4EF6\u5939\u4E0D\u8BA1\u5165\u3002"
     ).addButton(
       (b) => b.setButtonText("\u5237\u65B0").onClick(async () => {
         reconcileGroupOrders(this.app, this.plugin.settings);
         const kbs = scanKnowledgeBases(this.app, this.plugin.settings, this.plugin.isHiddenForList);
-        new import_obsidian15.Notice(`\u8BC6\u522B\u5230 ${kbs.length} \u4E2A\u77E5\u8BC6\u5E93`);
+        new import_obsidian20.Notice(`\u8BC6\u522B\u5230 ${kbs.length} \u4E2A\u77E5\u8BC6\u5E93`);
         await this.plugin.saveSettings();
       })
     );
-    if (this.plugin.hasLegacyGroupDefs()) {
-      const legacy = this.plugin.settings.groups.filter((g) => !g.path);
-      const plan = planLegacyMigration(this.app, this.plugin.settings);
-      const moving = plan.reduce((n, item) => n + item.members.length, 0);
-      new import_obsidian15.Setting(containerEl).setName("\u65E7\u5206\u7EC4\u8FC1\u79FB").setHeading();
-      containerEl.createEl("p", {
-        cls: "kb-setting-hint",
-        text: `\u8FD8\u6709 ${legacy.length} \u4E2A\u65E7\u7248\u865A\u62DF\u5206\u7EC4\uFF0C\u5171 ${moving} \u4E2A\u77E5\u8BC6\u5E93\u9700\u8981\u642C\u8FDB\u771F\u5B9E\u5206\u7EC4\u6587\u4EF6\u5939\u3002\u8FC1\u79FB\u4F1A\u771F\u5B9E\u79FB\u52A8\u6587\u4EF6\u5939\uFF0C\u5E76\u540C\u6B65\u66F4\u65B0\u6392\u5E8F\u3001\u9690\u85CF\u4E0E\u540D\u79F0\u8BB0\u5F55\uFF1B\u4E0D\u4F1A\u5220\u9664\u4EFB\u4F55\u7B14\u8BB0\u3002`
-      });
-      new import_obsidian15.Setting(containerEl).setName("\u8FC1\u79FB\u4E3A\u771F\u5B9E\u6587\u4EF6\u5939").setDesc("\u9996\u6B21\u52A0\u8F7D\u65F6\u4E5F\u4F1A\u81EA\u52A8\u63D0\u793A\uFF1B\u70B9\u51FB\u300C\u7A0D\u540E\u300D\u540E\u53EF\u4EE5\u5728\u8FD9\u91CC\u91CD\u65B0\u5F00\u59CB").addButton(
-        (b) => b.setButtonText("\u5F00\u59CB\u8FC1\u79FB").setCta().onClick(() => this.plugin.openMigrationModal())
-      );
-    }
-    new import_obsidian15.Setting(containerEl).setName("\u5206\u7EC4\u7BA1\u7406").setHeading();
+    new import_obsidian20.Setting(containerEl).setName("\u5206\u7EC4\u7BA1\u7406").setHeading();
     containerEl.createEl("p", {
       cls: "kb-setting-hint",
       text: "\u5206\u7EC4\u5C31\u662F vault \u6839\u76EE\u5F55\u4E0B\u7684\u4E00\u5C42\u771F\u5B9E\u6587\u4EF6\u5939\uFF0C\u7EC4\u5185\u77E5\u8BC6\u5E93\u662F\u5B83\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939\u3002\u91CD\u547D\u540D/\u5220\u9664\u5206\u7EC4\u4F1A\u76F4\u63A5\u64CD\u4F5C\u8FD9\u4E2A\u6587\u4EF6\u5939\u3002"
@@ -5079,17 +6619,17 @@ var KbSettingTab = class extends import_obsidian15.PluginSettingTab {
       });
     } else {
       for (const g of this.plugin.settings.groups) {
-        const exists = g.path ? !!getFolder(this.app, g.path) : false;
-        const desc = g.path ? `${exists ? "\u6587\u4EF6\u5939" : "\u6587\u4EF6\u5939\u4E0D\u5B58\u5728"}\uFF1A${g.path} \xB7 \u5305\u542B ${g.order.length} \u4E2A\u77E5\u8BC6\u5E93` : `\u65E7\u7248\u865A\u62DF\u5206\u7EC4\uFF08\u672A\u8FC1\u79FB\uFF09\xB7 \u5305\u542B ${g.order.length} \u4E2A\u77E5\u8BC6\u5E93`;
-        new import_obsidian15.Setting(containerEl).setName(g.name).setDesc(desc).addButton(
+        const exists = !!getFolder(this.app, g.path);
+        const desc = `${exists ? "\u6587\u4EF6\u5939" : "\u6587\u4EF6\u5939\u4E0D\u5B58\u5728"}\uFF1A${g.path} \xB7 \u5305\u542B ${g.order.length} \u4E2A\u77E5\u8BC6\u5E93`;
+        new import_obsidian20.Setting(containerEl).setName(g.name).setDesc(desc).addButton(
           (b) => b.setButtonText("\u5220\u9664").setWarning().onClick(() => {
             this.plugin.confirmModal(
               "\u5220\u9664\u5206\u7EC4",
-              g.path ? `\u786E\u5B9A\u5220\u9664\u5206\u7EC4\u300C${g.name}\u300D\u5417\uFF1F\u7EC4\u5185 ${g.order.length} \u4E2A\u77E5\u8BC6\u5E93\u4F1A\u79FB\u56DE vault \u6839\u76EE\u5F55\uFF08\u53D8\u6210\u672A\u5206\u7EC4\uFF09\uFF0C\u7136\u540E\u5220\u9664\u7A7A\u7684\u5206\u7EC4\u6587\u4EF6\u5939\uFF1B\u4E0D\u4F1A\u5220\u9664\u4EFB\u4F55\u7B14\u8BB0\u3002` : `\u786E\u5B9A\u5220\u9664\u5206\u7EC4\u300C${g.name}\u300D\u5417\uFF1F\u7EC4\u5185 ${g.order.length} \u4E2A\u77E5\u8BC6\u5E93\u4F1A\u56DE\u5230\u672A\u5206\u7EC4\uFF0C\u6587\u4EF6\u672C\u8EAB\u4E0D\u53D7\u5F71\u54CD\u3002`,
+              `\u786E\u5B9A\u5220\u9664\u5206\u7EC4\u300C${g.name}\u300D\u5417\uFF1F\u7EC4\u5185 ${g.order.length} \u4E2A\u77E5\u8BC6\u5E93\u4F1A\u79FB\u56DE vault \u6839\u76EE\u5F55\uFF08\u53D8\u6210\u672A\u5206\u7EC4\uFF09\uFF0C\u7136\u540E\u5220\u9664\u7A7A\u7684\u5206\u7EC4\u6587\u4EF6\u5939\uFF1B\u4E0D\u4F1A\u5220\u9664\u4EFB\u4F55\u7B14\u8BB0\u3002`,
               async () => {
                 const result = await this.plugin.dissolveGroup(g);
                 if (result.errors.length > 0) {
-                  new import_obsidian15.Notice("\u5220\u9664\u5206\u7EC4\u65F6\u51FA\u9519\uFF1A" + result.errors[0]);
+                  new import_obsidian20.Notice("\u5220\u9664\u5206\u7EC4\u65F6\u51FA\u9519\uFF1A" + result.errors[0]);
                 }
                 this.display();
               }
@@ -5098,46 +6638,42 @@ var KbSettingTab = class extends import_obsidian15.PluginSettingTab {
         );
       }
     }
-    if (!this.plugin.hasLegacyGroupDefs()) {
-      const groupPaths = new Set(
-        this.plugin.settings.groups.map((g) => g.path).filter(Boolean)
+    const groupPaths = new Set(this.plugin.settings.groups.map((g) => g.path));
+    const candidates = this.app.vault.getRoot().children.filter(
+      (c) => c instanceof import_obsidian20.TFolder && !c.name.startsWith(".") && !groupPaths.has(c.path)
+    );
+    if (candidates.length > 0) {
+      let chosen = candidates[0].path;
+      new import_obsidian20.Setting(containerEl).setName("\u628A\u73B0\u6709\u6587\u4EF6\u5939\u8BBE\u4E3A\u5206\u7EC4").setDesc("\u8BE5\u6587\u4EF6\u5939\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939\u4F1A\u6210\u4E3A\u77E5\u8BC6\u5E93\uFF1B\u76F4\u63A5\u653E\u5728\u5B83\u91CC\u9762\u7684\u7B14\u8BB0\u4E0D\u4F1A\u51FA\u73B0\u5728\u5361\u7247\u5899\u3002").addDropdown((d) => {
+        for (const folder of candidates)
+          d.addOption(folder.path, folder.path);
+        d.setValue(chosen).onChange((v) => chosen = v);
+      }).addButton(
+        (b) => b.setButtonText("\u8BBE\u4E3A\u5206\u7EC4").onClick(() => {
+          const folder = this.app.vault.getAbstractFileByPath(chosen);
+          if (!(folder instanceof import_obsidian20.TFolder))
+            return;
+          this.plugin.confirmModal(
+            "\u8BBE\u4E3A\u5206\u7EC4",
+            `\u628A\u300C${folder.name}\u300D\u4F5C\u4E3A\u5206\u7EC4\u6587\u4EF6\u5939\uFF1F\u5B83\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939\u4F1A\u53D8\u6210\u77E5\u8BC6\u5E93\u5361\u7247\uFF0C\u77E5\u8BC6\u5E93\u5185\u90E8\u5C42\u7EA7\u4E0D\u53D7\u5F71\u54CD\u3002`,
+            async () => {
+              this.plugin.settings.groups.push({
+                id: genGroupId(),
+                name: folder.name,
+                path: folder.path,
+                order: []
+              });
+              reconcileGroupOrders(this.app, this.plugin.settings);
+              await this.plugin.saveSettingsNow();
+              this.display();
+            }
+          );
+        })
       );
-      const candidates = this.app.vault.getRoot().children.filter(
-        (c) => c instanceof import_obsidian15.TFolder && !c.name.startsWith(".") && !groupPaths.has(c.path)
-      );
-      if (candidates.length > 0) {
-        let chosen = candidates[0].path;
-        new import_obsidian15.Setting(containerEl).setName("\u628A\u73B0\u6709\u6587\u4EF6\u5939\u8BBE\u4E3A\u5206\u7EC4").setDesc("\u8BE5\u6587\u4EF6\u5939\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939\u4F1A\u6210\u4E3A\u77E5\u8BC6\u5E93\uFF1B\u76F4\u63A5\u653E\u5728\u5B83\u91CC\u9762\u7684\u7B14\u8BB0\u4E0D\u4F1A\u51FA\u73B0\u5728\u5361\u7247\u5899\u3002").addDropdown((d) => {
-          for (const folder of candidates)
-            d.addOption(folder.path, folder.path);
-          d.setValue(chosen).onChange((v) => chosen = v);
-        }).addButton(
-          (b) => b.setButtonText("\u8BBE\u4E3A\u5206\u7EC4").onClick(() => {
-            const folder = this.app.vault.getAbstractFileByPath(chosen);
-            if (!(folder instanceof import_obsidian15.TFolder))
-              return;
-            this.plugin.confirmModal(
-              "\u8BBE\u4E3A\u5206\u7EC4",
-              `\u628A\u300C${folder.name}\u300D\u4F5C\u4E3A\u5206\u7EC4\u6587\u4EF6\u5939\uFF1F\u5B83\u7684\u76F4\u63A5\u5B50\u6587\u4EF6\u5939\u4F1A\u53D8\u6210\u77E5\u8BC6\u5E93\u5361\u7247\uFF0C\u77E5\u8BC6\u5E93\u5185\u90E8\u5C42\u7EA7\u4E0D\u53D7\u5F71\u54CD\u3002`,
-              async () => {
-                this.plugin.settings.groups.push({
-                  id: genGroupId(),
-                  name: folder.name,
-                  path: folder.path,
-                  order: []
-                });
-                reconcileGroupOrders(this.app, this.plugin.settings);
-                await this.plugin.saveSettingsNow();
-                this.display();
-              }
-            );
-          })
-        );
-      }
     }
     this.plugin.features.renderSettings(containerEl);
-    new import_obsidian15.Setting(containerEl).setName("\u8C03\u8BD5").setHeading();
-    new import_obsidian15.Setting(containerEl).setName("\u5F00\u542F\u8C03\u8BD5\u65E5\u5FD7").setDesc("\u5728\u5F00\u53D1\u8005\u63A7\u5236\u53F0\u8F93\u51FA\u8BE6\u7EC6\u65E5\u5FD7\uFF0C\u6392\u67E5\u95EE\u9898\u65F6\u4F7F\u7528").addToggle(
+    new import_obsidian20.Setting(containerEl).setName("\u8C03\u8BD5").setHeading();
+    new import_obsidian20.Setting(containerEl).setName("\u5F00\u542F\u8C03\u8BD5\u65E5\u5FD7").setDesc("\u5728\u5F00\u53D1\u8005\u63A7\u5236\u53F0\u8F93\u51FA\u8BE6\u7EC6\u65E5\u5FD7\uFF0C\u6392\u67E5\u95EE\u9898\u65F6\u4F7F\u7528").addToggle(
       (t) => t.setValue(this.plugin.settings.order.debugMode).onChange(async (v) => {
         var _a;
         this.plugin.settings.order.debugMode = v;

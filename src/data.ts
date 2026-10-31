@@ -22,14 +22,13 @@ export interface KnowledgeBase {
 
 /**
  * 一个分组 = vault 根目录下的一个真实文件夹。
- * 旧版虚拟分组没有 path 字段（只存在 data.json 里），迁移后写入真实路径。
  */
 export interface KnowledgeGroup {
   id: string;
   /** 显示名，与分组文件夹名保持一致 */
   name: string;
-  /** 真实文件夹路径，例如 "工作"。旧版虚拟分组为空 */
-  path?: string;
+  /** 真实文件夹路径，例如 "工作" */
+  path: string;
   /** 组内知识库的排序（存 path），未列入的排后面 */
   order: string[];
 }
@@ -74,16 +73,6 @@ export const DEFAULT_SETTINGS: KbSettings = {
   },
   admonition: { ...DEFAULT_ADMONITION },
 };
-
-/** 分组是否已经落到真实文件夹 */
-export function isRealGroup(group: KnowledgeGroup): boolean {
-  return !!group.path;
-}
-
-/** 是否还有尚未迁移的旧版虚拟分组 */
-export function hasLegacyGroups(settings: KbSettings): boolean {
-  return settings.groups.some((g) => !g.path);
-}
 
 export function parentPathOf(path: string): string {
   const i = path.lastIndexOf("/");
@@ -151,7 +140,6 @@ export function uniquePath(
  * 扫描 vault，把知识库识别出来：
  * - 真实分组文件夹的直接子文件夹 → 组内知识库
  * - 根目录下未被登记为分组的文件夹 → 未分组知识库
- * - 旧版虚拟分组仍在根目录的成员 → 按 groups[].order 识别（迁移前兼容）
  *
  * @param isHidden 「该路径当前是否被隐藏」——由调用方提供（与原生树共用同一套
  *   手动隐藏 + glob 规则）。隐藏起来的文件夹不该在知识库列表里冒头。
@@ -162,9 +150,7 @@ export function scanKnowledgeBases(
   isHidden: (path: string) => boolean = () => false
 ): KnowledgeBase[] {
   const root = app.vault.getRoot();
-  const groupPaths = new Set(
-    settings.groups.map((g) => g.path).filter((p): p is string => !!p)
-  );
+  const groupPaths = new Set(settings.groups.map((g) => g.path));
 
   const list: KnowledgeBase[] = [];
   const pushKb = (folder: TFolder, groupId: string | null): void => {
@@ -181,7 +167,6 @@ export function scanKnowledgeBases(
 
   // 真实分组：直接子文件夹（跳过嵌套分组文件夹本身）
   for (const group of settings.groups) {
-    if (!group.path) continue;
     const groupFolder = getFolder(app, group.path);
     if (!groupFolder || isHiddenFolder(groupFolder.name) || isHidden(groupFolder.path)) continue;
     for (const child of groupFolder.children) {
@@ -190,7 +175,7 @@ export function scanKnowledgeBases(
     }
   }
 
-  // 根目录：未分组知识库 + 尚未迁移的虚拟分组
+  // 根目录：未分组知识库
   for (const child of root.children) {
     if (!(child instanceof TFolder) || groupPaths.has(child.path)) continue;
     pushKb(child, findGroupOf(settings, child.path));
@@ -216,19 +201,12 @@ export function scanKnowledgeBases(
 }
 
 /**
- * 某知识库当前属于哪个分组。
- * 新版按父目录判断（分组文件夹的直接子文件夹）；
- * 旧版虚拟分组仍从 order 数组里取，保证迁移前能用。
+ * 某知识库当前属于哪个分组：按父目录判断（分组文件夹的直接子文件夹）。
  */
 export function findGroupOf(settings: KbSettings, path: string): string | null {
   const parent = parentPathOf(path);
   for (const g of settings.groups) {
-    if (g.path && g.path === parent) return g.id;
-  }
-  if (parent === "/") {
-    for (const g of settings.groups) {
-      if (!g.path && g.order.includes(path)) return g.id;
-    }
+    if (g.path === parent) return g.id;
   }
   return null;
 }
@@ -302,12 +280,9 @@ export async function createGroupFolder(app: App, name: string): Promise<string>
  */
 export function reconcileGroupOrders(app: App, settings: KbSettings): boolean {
   let changed = false;
-  const groupPaths = new Set(
-    settings.groups.map((g) => g.path).filter((p): p is string => !!p)
-  );
+  const groupPaths = new Set(settings.groups.map((g) => g.path));
 
   for (const group of settings.groups) {
-    if (!group.path) continue;
     const folder = getFolder(app, group.path);
     if (!folder) continue;
 
@@ -332,19 +307,12 @@ export function reconcileGroupOrders(app: App, settings: KbSettings): boolean {
     }
   }
 
-  const legacyMembers = new Set<string>();
-  for (const group of settings.groups) {
-    if (group.path) continue;
-    for (const p of group.order) legacyMembers.add(p);
-  }
-
   const rootKbs = app.vault
     .getRoot()
     .children.filter(
       (c): c is TFolder =>
         c instanceof TFolder &&
         !groupPaths.has(c.path) &&
-        !legacyMembers.has(c.path) &&
         !isHiddenFolder(c.name)
     )
     .map((c) => c.path)
@@ -393,7 +361,6 @@ export function migrateSettingsPaths(
 
   // 分组文件夹自身路径
   for (const group of settings.groups) {
-    if (!group.path) continue;
     const next = remapPath(group.path, oldPath, newPath);
     if (next !== group.path) {
       group.path = next;
@@ -453,94 +420,8 @@ export function migrateSettingsPaths(
 }
 
 // ============================================================
-// 旧版虚拟分组迁移
+// 分组删除
 // ============================================================
-
-export interface LegacyMigrationGroup {
-  group: KnowledgeGroup;
-  /** 当前仍在根目录、可以被搬进分组文件夹的成员 */
-  members: TFolder[];
-}
-
-export function planLegacyMigration(app: App, settings: KbSettings): LegacyMigrationGroup[] {
-  const rootPath = app.vault.getRoot().path;
-  return settings.groups
-    .filter((g) => !g.path)
-    .map((group) => ({
-      group,
-      members: group.order
-        .map((p) => app.vault.getAbstractFileByPath(p))
-        .filter(
-          (f): f is TFolder => f instanceof TFolder && (f.parent?.path ?? "") === rootPath
-        ),
-    }));
-}
-
-export interface MigrationResult {
-  moved: number;
-  groups: { name: string; path: string; renamed: boolean }[];
-  errors: string[];
-}
-
-/**
- * 把旧版虚拟分组落成真实文件夹：建组文件夹 → 移入成员 → 路径状态跟着迁移。
- * 幂等：已带 path 的分组跳过；中途失败下次可继续迁移剩下的。
- */
-export async function migrateLegacyGroups(
-  app: App,
-  settings: KbSettings,
-  onProgress?: (message: string) => void
-): Promise<MigrationResult> {
-  const result: MigrationResult = { moved: 0, groups: [], errors: [] };
-  const pending = settings.groups.filter((g) => !g.path);
-
-  for (const group of pending) {
-    // 先按旧 order 抓住成员：建好组文件夹后会触发 create 事件，
-    // reconcile 看到“组文件夹是空的”会清空 order，不能等那之后再取。
-    const members = group.order
-      .map((p) => app.vault.getAbstractFileByPath(p))
-      .filter(
-        (f): f is TFolder =>
-          f instanceof TFolder &&
-          (f.parent?.path ?? "") === app.vault.getRoot().path
-      );
-
-    const desired = safeFolderName(group.name);
-    const folderPath = uniquePath(app, "/", desired);
-    try {
-      await app.vault.createFolder(folderPath);
-    } catch (err) {
-      result.errors.push(`创建分组文件夹「${desired}」失败：${String(err)}`);
-      continue;
-    }
-
-    const renamed = baseNameOf(folderPath) !== group.name;
-    group.path = folderPath;
-    group.name = baseNameOf(folderPath);
-    result.groups.push({ name: group.name, path: folderPath, renamed });
-
-    const movedPaths: string[] = [];
-    for (const member of members) {
-      const oldPath = member.path;
-      onProgress?.(`移动「${member.name}」→「${group.name}」`);
-      const target = uniquePath(app, folderPath, member.name);
-      try {
-        await app.fileManager.renameFile(member, target);
-      } catch (err) {
-        result.errors.push(`移动「${oldPath}」失败：${String(err)}`);
-        continue;
-      }
-      migrateSettingsPaths(settings, oldPath, target);
-      movedPaths.push(target);
-      result.moved++;
-    }
-    // 按旧组内顺序写回；reconcile 再把其它已存在的子文件夹补到末尾
-    group.order = movedPaths;
-  }
-
-  reconcileGroupOrders(app, settings);
-  return result;
-}
 
 export interface DissolveResult {
   moved: number;
@@ -558,7 +439,7 @@ export async function dissolveGroup(
   group: KnowledgeGroup
 ): Promise<DissolveResult> {
   const result: DissolveResult = { moved: 0, errors: [], folderDeleted: false };
-  const folder = group.path ? getFolder(app, group.path) : null;
+  const folder = getFolder(app, group.path);
 
   if (folder) {
     for (const child of [...folder.children]) {

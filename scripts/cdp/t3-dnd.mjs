@@ -88,12 +88,18 @@ const TREE = () => {
 
 const RECT = ROW_RECT;
 
-/** 库根标题行的矩形（把它当作「移回库根」的放置目标） */
+/** 末行下方的树内空白（统一后等价于当前库根，和原生拖到根目录空白一致） */
 const ROOT_RECT = () => {
-  const el = document.querySelector(".kb-tree-title[data-path]");
+  const el = document.querySelector(".kb-tree-body");
   if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { x: r.x, y: r.y, w: r.width, h: r.height };
+  const cr = el.getBoundingClientRect();
+  const rows = [...el.querySelectorAll(".tree-item-self[data-path]")]
+    .map((row) => row.getBoundingClientRect())
+    .filter((r) => r.height > 0 && r.bottom > cr.top && r.top < cr.bottom);
+  const maxBottom = rows.length ? Math.max(...rows.map((r) => r.bottom)) : cr.top + 4;
+  const y = Math.round(maxBottom + 12);
+  if (y > cr.bottom - 8) return null;
+  return { x: Math.round(cr.x + 60), y, w: 1, h: 1 };
 };
 
 /** 从 src 行拖到 dst 行的指定高度比例（0=最上沿，0.5=中间，1=最下沿） */
@@ -138,9 +144,19 @@ const RESET_STATE = (box) =>
     const p = window.app.plugins.plugins["sun-home"];
     const v = window.app.workspace.getLeavesOfType("kb-tree-view")[0].view;
     v.collapsed.clear();
-    // 直接走真实入口（TS 的 private 在运行时不拦），不再另设测试专用钩子
-    v.applySortOrder(window.app.vault.getAbstractFileByPath(box), "byNameAsc");
+    const walk = (folder) => {
+      if (!folder) return;
+      const settings = p.sortFeature.ensureFolderSettings(folder.path);
+      settings.sortOrder = "byNameAsc";
+      settings.customOrder = [];
+      for (const child of folder.children) {
+        if (child.children) walk(child);
+      }
+    };
+    walk(window.app.vault.getAbstractFileByPath(box));
+    p.sortFeature.sortExplorer();
     await p.saveSettingsNow();
+    v.refresh();
     return true;
   })();
 
@@ -347,10 +363,16 @@ export default async (ctx) => {
     await sleep(400);
     // 源和目标都先归到名称升序：这样「按名称排在最前」和「按落点排在 B1 之后」不会巧合重合
     await ctx.page((box, b) => {
-      const v = window.app.workspace.getLeavesOfType("kb-tree-view")[0].view;
-      v.applySortOrder(window.app.vault.getAbstractFileByPath(box), "byNameAsc");
-      v.applySortOrder(window.app.vault.getAbstractFileByPath(b), "byNameAsc");
-      return window.app.plugins.plugins["sun-home"].saveSettingsNow();
+      const p = window.app.plugins.plugins["sun-home"];
+      for (const path of [box, b]) {
+        const settings = p.sortFeature.ensureFolderSettings(path);
+        settings.sortOrder = "byNameAsc";
+        settings.customOrder = [];
+      }
+      p.sortFeature.sortExplorer();
+      const v = window.app.workspace.getLeavesOfType("kb-tree-view")[0]?.view;
+      v?.refresh?.();
+      return p.saveSettingsNow();
     }, SANDBOX, B);
     await sleep(300);
 
@@ -406,7 +428,7 @@ export default async (ctx) => {
     );
   });
 
-  // ---------- 5. 拖回库根（库根标题行是放置目标） ----------
+  // ---------- 5. 拖回库根（树内空白等价库根） ----------
   await safe("阶段5拖回库根", async () => {
     const src = await ctx.page(RECT, `${A}/笔记A2.md`);
     const dst = await ctx.page(ROOT_RECT);

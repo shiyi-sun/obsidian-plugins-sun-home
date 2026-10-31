@@ -2,9 +2,11 @@ import { App, TAbstractFile, TFile, TFolder, Menu, EventRef } from "obsidian";
 import { OrderManager } from "./order-manager";
 import { HideManager } from "./hide-manager";
 import { Patcher } from "./patcher";
-import { DndEngine, DndHost } from "./dnd-engine";
+import { DndEngine } from "./dnd-engine";
+import { NativeTreeSurface } from "../tree/native-surface";
+import { TreeDndController } from "../tree/tree-dnd";
 import { ExplorerManager } from "./explorer-manager";
-import { populateFileMenu, MenuHost } from "./menu";
+import { populateFileMenu, populateSortMenu, MenuHost } from "./menu";
 import {
   OrderSettings,
   DEFAULT_ORDER_SETTINGS,
@@ -25,6 +27,8 @@ export class SortFeature {
   readonly orderManager: OrderManager;
   readonly hideManager = new HideManager();
   readonly patcher: Patcher;
+  readonly nativeSurface: NativeTreeSurface;
+  readonly dndController: TreeDndController;
   readonly dndEngine: DndEngine;
   readonly explorerManager: ExplorerManager;
 
@@ -74,24 +78,24 @@ export class SortFeature {
     this.patcher = new Patcher(
       () => this.getSettings(),
       this.orderManager,
-      () => this.getExplorerView(),
+      () => this.getExplorerViews(),
       () => this.syncIndicators()
     );
 
-    const dndHost: DndHost = {
+    this.nativeSurface = new NativeTreeSurface(this.app);
+    this.dndController = new TreeDndController({
       app: this.app,
       orderManager: this.orderManager,
       getSettings: () => this.getSettings(),
-      getExplorerView: () => this.getExplorerView(),
-      sortExplorer: () => this.sortExplorer(),
-      syncIndicators: () => this.syncIndicators(),
       getItemSettings: (path: string) => this.getItemSettings(path),
-    };
-    this.dndEngine = new DndEngine(dndHost);
+      resolveSource: (target) => this.nativeSurface.resolveDragSource(target),
+      resolveTargetSurface: (active, point) => this.nativeSurface.resolveSurfaceAt(active, point),
+    });
+    this.dndEngine = new DndEngine(this.dndController, this.nativeSurface);
 
     this.explorerManager = new ExplorerManager(
       () => this.getSettings(),
-      () => this.getExplorerView(),
+      () => this.getExplorerViews(),
       (path) => this.hideManager.isPatternHidden(path)
     );
   }
@@ -190,8 +194,12 @@ export class SortFeature {
    * 由调用方用 this.registerEvent() 包装，确保卸载时被自动摘除。
    *
    * @param register 由 Plugin 提供的注册函数，通常是 (ref) => this.registerEvent(ref)
+   * @param onMenuChanged 菜单里的置顶/隐藏/排序变化后的刷新回调
    */
-  registerVaultEvents(register: (ref: EventRef) => void): void {
+  registerVaultEvents(
+    register: (ref: EventRef) => void,
+    onMenuChanged?: () => void
+  ): void {
     // 先创建 EventRef，交由 Plugin 注册（自动清理），同时自己也留一份用于兜底 offref。
     const track = (ref: EventRef): void => {
       this.vaultEventRefs.push(ref);
@@ -237,7 +245,7 @@ export class SortFeature {
     // 右键菜单：往原生树注入置顶 / 隐藏 / 排序
     track(
       this.app.workspace.on("file-menu", (menu: Menu, file: any) => {
-        this.addFileMenuItems(menu, file);
+        this.addFileMenuItems(menu, file, onMenuChanged);
       })
     );
   }
@@ -247,19 +255,32 @@ export class SortFeature {
    * 原生树靠上面的 file-menu 事件复用；插件自己的树直接调用，
    * 不再走全局广播 —— 广播里 Obsidian 注入的那几条在本插件菜单中并不生效。
    */
-  addFileMenuItems(menu: Menu, file: any): void {
+  addFileMenuItems(menu: Menu, file: any, onChanged?: () => void): void {
     if (!file || file.path === "/") return;
-    const host: MenuHost = {
+    populateFileMenu(menu, file, this.menuHost(onChanged));
+  }
+
+  /** 只注入「排序方式」，用于库根空白右键（不显示根文件夹的置顶/隐藏） */
+  addSortOnly(menu: Menu, folder: TFolder, onChanged?: () => void): void {
+    const settings = this.ensureFolderSettings(folder.path);
+    menu.addItem((entry) => {
+      entry.setTitle("排序方式").setIcon("sort-asc");
+      const submenu: Menu = (entry as any).setSubmenu?.() ?? menu;
+      populateSortMenu(submenu, settings.sortOrder, this.menuHost(onChanged), folder.path, settings);
+    });
+  }
+
+  private menuHost(onChanged?: () => void): MenuHost {
+    return {
       settings: this.getSettings(),
       ensureItemSettings: (f: TAbstractFile) => this.ensureItemSettings(f),
       app: this.app,
       orderManager: this.orderManager,
-      getExplorerView: () => this.getExplorerView(),
       sortExplorer: () => this.sortExplorer(),
       syncIndicators: () => this.syncIndicators(),
       saveSettingsNow: () => this.saveNow(),
+      onChanged,
     };
-    populateFileMenu(menu, file, host);
   }
 
   /**
@@ -333,8 +354,12 @@ export class SortFeature {
   }
 
   getExplorerView(): any {
-    const leaves = this.app.workspace.getLeavesOfType("file-explorer");
-    return leaves.length > 0 ? leaves[0].view : null;
+    return this.getExplorerViews()[0] ?? null;
+  }
+
+  /** 侧栏/主区域可能同时存在多个 Files 面板，全部返回 */
+  getExplorerViews(): any[] {
+    return this.app.workspace.getLeavesOfType("file-explorer").map((leaf) => leaf.view);
   }
 
   sortExplorer(): void {

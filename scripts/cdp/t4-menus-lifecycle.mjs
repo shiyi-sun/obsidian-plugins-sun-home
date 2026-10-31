@@ -108,10 +108,18 @@ export default async (ctx) => {
   rep.文件菜单 = fileMenu.map((i) => `${i.text}[${i.图标}]`);
   add("文件右键菜单没有同名重复项", dupes(fileMenu).length === 0, rep.文件菜单);
   add(
-    "文件菜单只保留插件自己的条目 + 置顶/隐藏（Obsidian 的注入项已不再出现）",
-    ["打开", "在新标签页打开", "重命名", "删除", "复制路径", "在系统资源管理器中显示", "置顶", "隐藏"].every((t) =>
-      rep.文件菜单.some((x) => x.startsWith(t + "["))
-    ) && !rep.文件菜单.some((x) => x.startsWith("使用默认应用打开")) && !rep.文件菜单.some((x) => x.startsWith("将文件移动到")),
+    "文件菜单按原生分组补齐核心项（含创建副本/移动到/系统项）",
+    [
+      "在新标签页中打开",
+      "创建副本",
+      "将文件移动到…",
+      "复制路径",
+      "在系统资源管理器中显示",
+      "置顶",
+      "隐藏",
+      "重命名",
+      "删除",
+    ].every((t) => rep.文件菜单.some((x) => x.startsWith(t + "["))),
     rep.文件菜单
   );
 
@@ -191,9 +199,19 @@ export default async (ctx) => {
   rep.文件夹菜单 = folderMenu.map((i) => `${i.text}[${i.图标}]`);
   add("文件夹右键菜单没有同名重复项", dupes(folderMenu).length === 0, rep.文件夹菜单);
   add(
-    "文件夹菜单含 新建笔记/新建文件夹/重命名/删除/折叠/排序方式/置顶/隐藏",
-    ["新建笔记", "新建文件夹", "重命名", "删除", "排序方式", "置顶", "隐藏"].every((t) => rep.文件夹菜单.some((x) => x.startsWith(t + "["))) &&
-      rep.文件夹菜单.some((x) => x.startsWith("折叠此文件夹") || x.startsWith("展开此文件夹")),
+    "文件夹菜单按原生分组补齐（新建/副本/移动/查找/排序/置顶/隐藏/重命名/删除）",
+    [
+      "新建笔记",
+      "新建文件夹",
+      "创建副本",
+      "将文件夹移动到…",
+      "在文件夹中查找",
+      "排序方式",
+      "置顶",
+      "隐藏",
+      "重命名",
+      "删除",
+    ].every((t) => rep.文件夹菜单.some((x) => x.startsWith(t + "["))),
     rep.文件夹菜单
   );
   await ctx.page(() => (document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), true));
