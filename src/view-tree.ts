@@ -75,6 +75,10 @@ export class KbTreeView extends ItemView {
   private inGesture = false;
   /** 手势期间被推迟的重绘 */
   private pendingRender = false;
+  /** 手势期间被推迟的自动定位 */
+  private pendingRevealPath: string | null = null;
+  /** 上一次自动定位针对的活动笔记；点侧栏本身也会触发 active-leaf-change */
+  private lastActivePath: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: KbHomePlugin) {
     super(leaf);
@@ -125,8 +129,8 @@ export class KbTreeView extends ItemView {
       this.inGesture = true;
     });
     // click 冒泡到面板时，行上的处理器已经跑完，此时补重绘是安全的。
-    // 右键与拖拽不会派发 click，分别用 contextmenu / dragend 收尾。
-    for (const type of ["click", "contextmenu", "dragend"] as const) {
+    // 右键、中键与拖拽不会派发 click，分别用 contextmenu / auxclick / dragend 收尾。
+    for (const type of ["click", "auxclick", "contextmenu", "dragend"] as const) {
       this.registerDomEvent(this.containerEl, type, () => this.endGesture());
     }
 
@@ -138,11 +142,18 @@ export class KbTreeView extends ItemView {
     );
     this.setupKeyScope();
 
+    this.lastActivePath = this.app.workspace.getActiveFile()?.path ?? null;
+
     // 活动文件变化时：先同步高亮（轻量，只切 class），
     // 若开启自动定位再展开父级（可能被手势保护推迟）。
+    // active-leaf-change 也会在点击侧栏面板时触发，但此时活动文件没变；
+    // 只有文件真的换了才定位，否则会把视口从用户正在点的位置拽走。
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
+        const path = this.app.workspace.getActiveFile()?.path ?? null;
         this.updateActiveHighlight();
+        if (path === this.lastActivePath) return;
+        this.lastActivePath = path;
         if (this.autoReveal && this.currentPath) this.revealActive();
       })
     );
@@ -441,6 +452,10 @@ export class KbTreeView extends ItemView {
     }
     if (changed) this.refresh();
     this.renderer?.updateActive(active.path);
+    if (this.inGesture) {
+      this.pendingRevealPath = active.path;
+      return;
+    }
     this.renderer?.scrollToPath(active.path);
   }
 
@@ -519,18 +534,30 @@ export class KbTreeView extends ItemView {
     this.rebuild();
   }
 
-  /** 手势收尾：补做被推迟的重绘 */
+  /** 手势收尾：补做被推迟的重绘与自动定位 */
   private endGesture(): void {
     this.inGesture = false;
     if (this.dragExpanded) {
       this.dragExpanded = false;
       this.pendingRender = false;
       this.rebuild();
+      this.flushPendingReveal();
       return;
     }
-    if (!this.pendingRender) return;
-    this.pendingRender = false;
-    this.rebuild();
+    if (this.pendingRender) {
+      this.pendingRender = false;
+      this.rebuild();
+    }
+    this.flushPendingReveal();
+  }
+
+  /** 手势结束后再定位；期间文件又变了就放弃，等新的 active-leaf-change 接手 */
+  private flushPendingReveal(): void {
+    const path = this.pendingRevealPath;
+    this.pendingRevealPath = null;
+    if (!path) return;
+    if (path !== (this.app.workspace.getActiveFile()?.path ?? null)) return;
+    this.renderer?.scrollToPath(path);
   }
 
   private rebuild(): void {

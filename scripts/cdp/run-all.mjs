@@ -12,6 +12,7 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const cases = [
   "t0-sandbox.mjs", // 先建好沙箱库，保证整套用例可反复跑
   "t1-click.mjs", // 单击切换笔记（本次修复的回归点）
+  "t20-cross-folder-click.mjs", // 跨文件夹单击：自动定位不得在手势中重建行
   "t2-toolbar-menu.mjs", // 树工具条 + 右键菜单 + 新建/重命名/删除
   "t4-menus-lifecycle.mjs", // 菜单去重 / 卸载清残留 / 分组删除确认
   "t3-dnd.mjs", // 树内拖拽调序 / 移入文件夹 / 卡片墙拖拽

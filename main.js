@@ -3396,6 +3396,10 @@ var KbTreeView = class extends import_obsidian11.ItemView {
     this.inGesture = false;
     /** 手势期间被推迟的重绘 */
     this.pendingRender = false;
+    /** 手势期间被推迟的自动定位 */
+    this.pendingRevealPath = null;
+    /** 上一次自动定位针对的活动笔记；点侧栏本身也会触发 active-leaf-change */
+    this.lastActivePath = null;
     this.plugin = plugin;
   }
   getViewType() {
@@ -3429,11 +3433,12 @@ var KbTreeView = class extends import_obsidian11.ItemView {
     this.render();
   }
   async onOpen() {
+    var _a, _b;
     this.render();
     this.registerDomEvent(this.containerEl, "pointerdown", () => {
       this.inGesture = true;
     });
-    for (const type of ["click", "contextmenu", "dragend"]) {
+    for (const type of ["click", "auxclick", "contextmenu", "dragend"]) {
       this.registerDomEvent(this.containerEl, type, () => this.endGesture());
     }
     this.registerDomEvent(
@@ -3447,9 +3452,15 @@ var KbTreeView = class extends import_obsidian11.ItemView {
       (event) => this.handleTreeBackgroundClick(event)
     );
     this.setupKeyScope();
+    this.lastActivePath = (_b = (_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) != null ? _b : null;
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
+        var _a2, _b2;
+        const path = (_b2 = (_a2 = this.app.workspace.getActiveFile()) == null ? void 0 : _a2.path) != null ? _b2 : null;
         this.updateActiveHighlight();
+        if (path === this.lastActivePath)
+          return;
+        this.lastActivePath = path;
         if (this.autoReveal && this.currentPath)
           this.revealActive();
       })
@@ -3726,6 +3737,10 @@ var KbTreeView = class extends import_obsidian11.ItemView {
     if (changed)
       this.refresh();
     (_a = this.renderer) == null ? void 0 : _a.updateActive(active.path);
+    if (this.inGesture) {
+      this.pendingRevealPath = active.path;
+      return;
+    }
     (_b = this.renderer) == null ? void 0 : _b.scrollToPath(active.path);
   }
   /** 一键折叠全部 / 展开全部 */
@@ -3798,19 +3813,32 @@ var KbTreeView = class extends import_obsidian11.ItemView {
     this.pendingRender = false;
     this.rebuild();
   }
-  /** 手势收尾：补做被推迟的重绘 */
+  /** 手势收尾：补做被推迟的重绘与自动定位 */
   endGesture() {
     this.inGesture = false;
     if (this.dragExpanded) {
       this.dragExpanded = false;
       this.pendingRender = false;
       this.rebuild();
+      this.flushPendingReveal();
       return;
     }
-    if (!this.pendingRender)
+    if (this.pendingRender) {
+      this.pendingRender = false;
+      this.rebuild();
+    }
+    this.flushPendingReveal();
+  }
+  /** 手势结束后再定位；期间文件又变了就放弃，等新的 active-leaf-change 接手 */
+  flushPendingReveal() {
+    var _a, _b, _c;
+    const path = this.pendingRevealPath;
+    this.pendingRevealPath = null;
+    if (!path)
       return;
-    this.pendingRender = false;
-    this.rebuild();
+    if (path !== ((_b = (_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) != null ? _b : null))
+      return;
+    (_c = this.renderer) == null ? void 0 : _c.scrollToPath(path);
   }
   rebuild() {
     var _a, _b, _c;
