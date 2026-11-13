@@ -3934,6 +3934,8 @@ var KbTreeView = class extends import_obsidian11.ItemView {
   /** 文件行单击：与原生一致，Alt 选中、Shift 范围、Ctrl/Cmd 开新标签 */
   handleFileClick(file, event) {
     var _a;
+    if (this.editingPath === file.path)
+      return;
     this.setFocusedPath(file.path);
     if (event.altKey) {
       this.selection.toggle(file.path);
@@ -3958,6 +3960,8 @@ var KbTreeView = class extends import_obsidian11.ItemView {
   }
   /** 文件夹行单击：Alt/Shift 只选中，不折叠；普通点击切换折叠 */
   handleFolderClick(folder, event) {
+    if (this.editingPath === folder.path)
+      return;
     this.setFocusedPath(folder.path);
     if (event.altKey) {
       this.selection.toggle(folder.path);

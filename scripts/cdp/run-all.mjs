@@ -21,6 +21,7 @@ const cases = [
   "t16-native-dnd.mjs", // 原生树拖拽：同级换位 / 名称序切自定义 / 面板重建 / 自投
   "t17-tree-parity-dnd.mjs", // 两棵树拖拽落点/顺序/指示线对比
   "t18-tree-parity-interactions.mjs", // 点击、选中、菜单、键盘、重命名、附件
+  "t21-rename-caret.mjs", // 行内重命名时点击标题定位光标（不得退出编辑）
   "t19-tree-perf.mjs", // 10k 单库虚拟化与拖拽性能（KB_PERF_COUNT 可缩短）
   "t8-persistence.mjs", // 落盘、重启恢复、ribbon 与命令
   "t15-group-order.mjs", // 分组标题拖拽调整分组之间的显示顺序

@@ -667,6 +667,9 @@ export class KbTreeView extends ItemView {
 
   /** 文件行单击：与原生一致，Alt 选中、Shift 范围、Ctrl/Cmd 开新标签 */
   private handleFileClick(file: TFile, event: MouseEvent): void {
+    // 行内重命名期间，标题上的点击要留给 contenteditable 定位光标：
+    // 继续走选中/打开会把焦点抢回行上，输入框失焦即退出编辑。
+    if (this.editingPath === file.path) return;
     this.setFocusedPath(file.path);
 
     if (event.altKey) {
@@ -693,6 +696,7 @@ export class KbTreeView extends ItemView {
 
   /** 文件夹行单击：Alt/Shift 只选中，不折叠；普通点击切换折叠 */
   private handleFolderClick(folder: TFolder, event: MouseEvent): void {
+    if (this.editingPath === folder.path) return;
     this.setFocusedPath(folder.path);
 
     if (event.altKey) {
