@@ -6024,6 +6024,11 @@ var KbHomePlugin = class extends import_obsidian20.Plugin {
     super(...arguments);
     /** 工作区就绪后要跑的装配期回调（功能用 ctx.onLayoutReady 排进来） */
     this.layoutReadyQueue = [];
+    /**
+     * layout-ready 之前，vault 的 create/rename 事件来自首次扫描而不是真实结构变化；
+     * 此时根目录只扫到一部分，不能拿来做分组/未分组排序的对齐。
+     */
+    this.vaultReady = false;
     /** 是否应从列表里彻底不出现（卡片墙用；与原生树共用同一套隐藏规则与开关） */
     this.isHiddenForList = (path) => {
       var _a, _b;
@@ -6168,7 +6173,7 @@ var KbHomePlugin = class extends import_obsidian20.Plugin {
   handleVaultRename(file, oldPath) {
     if (file instanceof import_obsidian20.TFolder) {
       const changed = migrateSettingsPaths(this.settings, oldPath, file.path);
-      const reconciled = reconcileGroupOrders(this.app, this.settings);
+      const reconciled = this.vaultReady ? reconcileGroupOrders(this.app, this.settings) : false;
       if (changed || reconciled)
         this.saveSettingsDebounced();
       this.notifyTreePathRenamed(oldPath, file.path);
@@ -6176,14 +6181,14 @@ var KbHomePlugin = class extends import_obsidian20.Plugin {
     this.refreshViews();
   }
   handleStructureChange() {
+    if (!this.vaultReady)
+      return;
     if (reconcileGroupOrders(this.app, this.settings))
       this.saveSettingsDebounced();
     this.refreshViews();
   }
   async onload() {
     await this.loadSettings();
-    if (reconcileGroupOrders(this.app, this.settings))
-      void this.persist();
     this.features = new FeatureRegistry(
       [new SortOrderFeature(), new AdmonitionFeature()],
       featureContext(this, {
@@ -6240,6 +6245,7 @@ var KbHomePlugin = class extends import_obsidian20.Plugin {
       this.app.vault.on("rename", (file, oldPath) => this.handleVaultRename(file, oldPath))
     );
     this.app.workspace.onLayoutReady(() => {
+      this.vaultReady = true;
       const pending = this.layoutReadyQueue;
       this.layoutReadyQueue = [];
       for (const cb of pending) {
@@ -6248,6 +6254,14 @@ var KbHomePlugin = class extends import_obsidian20.Plugin {
         } catch (err) {
           console.error("[sun-home] \u529F\u80FD\u7684 layout-ready \u88C5\u914D\u5931\u8D25\uFF1A", err);
         }
+      }
+      try {
+        if (reconcileGroupOrders(this.app, this.settings)) {
+          void this.saveSettingsNow();
+          this.refreshViews();
+        }
+      } catch (err) {
+        console.error("[sun-home] \u542F\u52A8\u540E\u5BF9\u9F50\u5206\u7EC4/\u672A\u5206\u7EC4\u6392\u5E8F\u5931\u8D25\uFF1A", err);
       }
       try {
         if (this.settings.openOnStartup) {

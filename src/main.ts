@@ -45,6 +45,11 @@ export default class KbHomePlugin extends Plugin {
   features: FeatureRegistry;
   /** 工作区就绪后要跑的装配期回调（功能用 ctx.onLayoutReady 排进来） */
   private layoutReadyQueue: (() => void)[] = [];
+  /**
+   * layout-ready 之前，vault 的 create/rename 事件来自首次扫描而不是真实结构变化；
+   * 此时根目录只扫到一部分，不能拿来做分组/未分组排序的对齐。
+   */
+  private vaultReady = false;
   /** 设置面板实例，供功能改完设置后重绘自己那一节 */
   private settingTab?: PluginSettingTab;
 
@@ -184,7 +189,8 @@ export default class KbHomePlugin extends Plugin {
   private handleVaultRename(file: TAbstractFile, oldPath: string): void {
     if (file instanceof TFolder) {
       const changed = migrateSettingsPaths(this.settings, oldPath, file.path);
-      const reconciled = reconcileGroupOrders(this.app, this.settings);
+      // 扫描完成前文件树不完整，对齐会按残缺子项清空顺序，跳过
+      const reconciled = this.vaultReady ? reconcileGroupOrders(this.app, this.settings) : false;
       if (changed || reconciled) this.saveSettingsDebounced();
       this.notifyTreePathRenamed(oldPath, file.path);
     }
@@ -192,14 +198,17 @@ export default class KbHomePlugin extends Plugin {
   }
 
   private handleStructureChange(): void {
+    // 同上：启动扫描期间的 create 事件不是真实结构变化
+    if (!this.vaultReady) return;
     if (reconcileGroupOrders(this.app, this.settings)) this.saveSettingsDebounced();
     this.refreshViews();
   }
 
   async onload() {
     await this.loadSettings();
-    // 外部新增/移动/删除文件夹后，组内与未分组排序跟文件系统对齐
-    if (reconcileGroupOrders(this.app, this.settings)) void this.persist();
+    // 这里不能立刻 reconcile：插件 onload 早于 Obsidian 读取文件树，
+    // 此时根目录为空，会被当成「文件夹全被删了」把首页排序清空并落盘。
+    // 首次对齐放到 layout-ready（文件树已读完）时执行。
 
     this.features = new FeatureRegistry(
       [new SortOrderFeature(), new AdmonitionFeature()],
@@ -265,6 +274,7 @@ export default class KbHomePlugin extends Plugin {
     // 启动时自动打开卡片页；功能排在 layout-ready 之后的装配也在这里跑
     // （文件浏览器要到 workspace 就绪才挂载，patch 才有对象可打）
     this.app.workspace.onLayoutReady(() => {
+      this.vaultReady = true;
       const pending = this.layoutReadyQueue;
       this.layoutReadyQueue = [];
       for (const cb of pending) {
@@ -273,6 +283,15 @@ export default class KbHomePlugin extends Plugin {
         } catch (err) {
           console.error("[sun-home] 功能的 layout-ready 装配失败：", err);
         }
+      }
+      // 文件树已完整：外部新增/移动/删除的文件夹在这里和首页排序对齐一次
+      try {
+        if (reconcileGroupOrders(this.app, this.settings)) {
+          void this.saveSettingsNow();
+          this.refreshViews();
+        }
+      } catch (err) {
+        console.error("[sun-home] 启动后对齐分组/未分组排序失败：", err);
       }
       try {
         if (this.settings.openOnStartup) {

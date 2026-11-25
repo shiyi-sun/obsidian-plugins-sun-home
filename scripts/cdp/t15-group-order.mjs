@@ -1,6 +1,7 @@
 /*
 分组标题拖拽排序：真实鼠标拖动分组标题，验证放置指示线、settings.groups 顺序与落盘。
-测试会临时创建三个分组，结束后删除测试文件夹并恢复原有 groups 数组。
+最后做「重载回归」：把未分组顺序改成非扫描顺序后重载，断言内存/磁盘/DOM 都原样保留。
+测试会临时创建三个分组，结束后删除测试文件夹、恢复原有 groups 与 ungroupedOrder。
 */
 import { READY, MARK_RELOAD } from "./lib.mjs";
 
@@ -94,6 +95,44 @@ const CLEAR_MARKS = () => {
   window.app.plugins.plugins["sun-home"].refreshViews();
 };
 
+/** 首页每个分组的卡片顺序（含「未分组」区） */
+const HOME_ORDER = () => {
+  const view = window.app.workspace.getLeavesOfType("kb-home-view")[0]?.view;
+  const root = view?.containerEl;
+  if (!root) return null;
+  return [...root.querySelectorAll(".kb-group")].map((sec) => ({
+    id: sec.dataset.groupId,
+    name: sec.querySelector(".kb-group-name")?.textContent?.trim() ?? "",
+    cards: [...sec.querySelectorAll(".kb-card")].map((c) => c.dataset.path),
+  }));
+};
+
+/** 把未分组顺序旋转一位：制造明显不同于扫描顺序的排列并落盘 */
+const ROTATE_UNGROUPED = async () => {
+  const p = window.app.plugins.plugins["sun-home"];
+  const rotated = p.settings.ungroupedOrder.slice();
+  if (rotated.length > 1) rotated.push(rotated.shift());
+  p.settings.ungroupedOrder = rotated;
+  await p.saveSettingsNow();
+  p.refreshViews();
+  return {
+    groups: p.settings.groups.map((g) => ({ id: g.id, order: g.order.slice() })),
+    ungroupedOrder: rotated,
+  };
+};
+
+/** 重载后从内存与 data.json 读回顺序 */
+const READ_ORDERS = async () => {
+  const p = window.app.plugins.plugins["sun-home"];
+  const disk = await p.loadData();
+  return {
+    groups: p.settings.groups.map((g) => ({ id: g.id, order: g.order.slice() })),
+    ungroupedOrder: p.settings.ungroupedOrder.slice(),
+    diskGroups: (disk?.groups || []).map((g) => ({ id: g.id, order: g.order })),
+    diskUngrouped: disk?.ungroupedOrder ?? null,
+  };
+};
+
 async function dragGroup(ctx, fromName, toName, after) {
   const geo = await ctx.page(FIT_GROUPS, fromName, toName, after);
   if (geo.err) return { geo, marks: null };
@@ -141,6 +180,9 @@ export default async (ctx) => {
   await sleep(800);
 
   const original = await ctx.page(() => JSON.parse(JSON.stringify(window.app.plugins.plugins["sun-home"].settings.groups)));
+  const originalUngrouped = await ctx.page(() =>
+    window.app.plugins.plugins["sun-home"].settings.ungroupedOrder.slice()
+  );
   rep.创建前 = await ctx.page(STATE);
 
   rep.创建 = await ctx.page(async (names) => {
@@ -191,22 +233,67 @@ export default async (ctx) => {
     { expected, 持久化后: rep.持久化后 }
   );
 
-  rep.清理 = await ctx.page(async (originalGroups, ids) => {
+  // ---------- 重载回归：非扫描顺序必须在插件重新加载后原样保留 ----------
+  const beforeReload = await ctx.page(ROTATE_UNGROUPED);
+  await sleep(600);
+  const domBefore = await ctx.page(HOME_ORDER);
+  const firstCard = domBefore?.find((g) => g.id === "__ungrouped__")?.cards?.[0] ?? null;
+  add(
+    "回归前置：未分组被改成非扫描顺序，页面第一张卡随之前移",
+    !!firstCard && firstCard === beforeReload.ungroupedOrder[0],
+    { firstCard, expectedFirst: beforeReload.ungroupedOrder[0] }
+  );
+
+  await ctx.page(MARK_RELOAD);
+  await ctx.reloadApp();
+  rep.重载ready = await waitReady(ctx);
+  await ctx.page(async () => {
+    await window.app.commands.executeCommandById("sun-home:open-kb-home");
+  });
+  await sleep(900);
+
+  const afterReload = await ctx.page(READ_ORDERS);
+  const domAfter = await ctx.page(HOME_ORDER);
+  add(
+    "重载后：分组顺序与未分组顺序在内存中原样保留",
+    JSON.stringify(afterReload.groups) === JSON.stringify(beforeReload.groups) &&
+      JSON.stringify(afterReload.ungroupedOrder) === JSON.stringify(beforeReload.ungroupedOrder),
+    {
+      before: beforeReload,
+      after: { groups: afterReload.groups, ungroupedOrder: afterReload.ungroupedOrder },
+    }
+  );
+  add(
+    "重载后：data.json 没有被启动扫描重排写回",
+    JSON.stringify(afterReload.diskGroups) === JSON.stringify(afterReload.groups) &&
+      JSON.stringify(afterReload.diskUngrouped) === JSON.stringify(afterReload.ungroupedOrder),
+    { disk: { groups: afterReload.diskGroups, ungrouped: afterReload.diskUngrouped } }
+  );
+  add(
+    "重载后：页面卡片顺序与重载前逐组一致",
+    !!domAfter && JSON.stringify(domAfter) === JSON.stringify(domBefore),
+    { domBefore, domAfter }
+  );
+
+  rep.清理 = await ctx.page(async (originalGroups, ids, ungrouped) => {
     const p = window.app.plugins.plugins["sun-home"];
     for (const id of ids) {
       const g = p.settings.groups.find((x) => x.id === id);
       if (g) await p.dissolveGroup(g);
     }
     p.settings.groups = originalGroups;
+    // 解散分组会把测试文件夹移回根目录并触发对齐，最后再恢复未分组顺序
+    p.settings.ungroupedOrder = ungrouped;
     await p.saveSettingsNow();
     p.refreshViews();
     return {
       groups: p.settings.groups.map((g) => g.name),
+      ungroupedOrder: p.settings.ungroupedOrder.slice(),
       folders: ids
         .map((id) => originalGroups.find((g) => g.id === id)?.path)
         .filter(Boolean),
     };
-  }, original, rep.创建.map((g) => g.id));
+  }, original, rep.创建.map((g) => g.id), originalUngrouped);
   await sleep(800);
 
   const 沙箱残留 = await ctx.page((names) => {
@@ -219,6 +306,11 @@ export default async (ctx) => {
       JSON.stringify(rep.清理.groups) ===
         JSON.stringify(original.map((g) => g.name)),
     { 沙箱残留, 清理: rep.清理, original }
+  );
+  add(
+    "清理：未分组顺序已恢复为测试前",
+    JSON.stringify(rep.清理.ungroupedOrder) === JSON.stringify(originalUngrouped),
+    { 清理: rep.清理.ungroupedOrder, originalUngrouped }
   );
   await ctx.page(CLEAR_MARKS);
 
